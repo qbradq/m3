@@ -1,0 +1,466 @@
+package linker
+
+import (
+	"encoding/binary"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/qbradq/m3/pkg/asm"
+)
+
+func TestLinkSingleObject(t *testing.T) {
+	src := `
+    .export main, reset_handler, nmi_handler, irq_handler
+    PPU_CTRL = $2000
+
+.bank 0
+main:
+    LDA #$00
+    STA PPU_CTRL
+    JSR helper
+    JMP main
+
+helper:
+    RTS
+
+.bank 63
+reset_handler:
+    SEI
+    CLD
+    JMP main
+
+nmi_handler:
+    RTI
+
+irq_handler:
+    RTI
+`
+	objFile, err := asm.Assemble("main.m3", src)
+	if err != nil {
+		t.Fatalf("assembly failed: %v", err)
+	}
+
+	l := NewLinker(objFile)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("linking failed: %v", err)
+	}
+
+	if len(rom) != TotalOutputSize {
+		t.Fatalf("expected ROM size %d, got %d", TotalOutputSize, len(rom))
+	}
+
+	// Verify iNES header
+	if string(rom[0:4]) != "NES\x1A" {
+		t.Errorf("invalid iNES header magic: %v", rom[0:4])
+	}
+	if rom[4] != 32 { // 512KB PRG = 32 * 16KB
+		t.Errorf("expected 32 PRG 16KB units, got %d", rom[4])
+	}
+	if rom[5] != 0 { // 0 CHR ROM units (CHR-RAM)
+		t.Errorf("expected 0 CHR units, got %d", rom[5])
+	}
+	if rom[6] != 0x40 { // Mapper 4 lower nibble (0x40)
+		t.Errorf("expected flags6 = 0x40, got 0x%02X", rom[6])
+	}
+
+	// Verify Bank 0 machine code at offset 16 (Header) + 0 (Bank 0)
+	bank0Offset := INESHeaderSize
+	// main is at $8000: LDA #$00 (A9 00), STA $2000 (8D 00 20), JSR helper (20 0B 80), JMP main (4C 00 80), helper: RTS (60)
+	expectedBank0 := []byte{
+		0xA9, 0x00, // LDA #$00
+		0x8D, 0x00, 0x20, // STA $2000
+		0x20, 0x0B, 0x80, // JSR $800B (helper)
+		0x4C, 0x00, 0x80, // JMP $8000 (main)
+		0x60, // RTS
+	}
+	for i, exp := range expectedBank0 {
+		if rom[bank0Offset+i] != exp {
+			t.Errorf("bank 0 byte at %d mismatch: got 0x%02X, want 0x%02X", i, rom[bank0Offset+i], exp)
+		}
+	}
+
+	// Verify Bank 63 vectors at offset: 16 + 63 * 8192 = 516112
+	bank63Offset := INESHeaderSize + 63*BankSize
+	nmiAddr := binary.LittleEndian.Uint16(rom[bank63Offset+NMIVectorOffset : bank63Offset+NMIVectorOffset+2])
+	resetAddr := binary.LittleEndian.Uint16(rom[bank63Offset+ResetVectorOffset : bank63Offset+ResetVectorOffset+2])
+	irqAddr := binary.LittleEndian.Uint16(rom[bank63Offset+IRQVectorOffset : bank63Offset+IRQVectorOffset+2])
+
+	if resetAddr != 0xE000 {
+		t.Errorf("reset vector: got $%04X, want $E000", resetAddr)
+	}
+	if nmiAddr != 0xE005 { // reset_handler is SEI (1) + CLD (1) + JMP main (3) = 5 bytes -> nmi_handler is at $E005
+		t.Errorf("nmi vector: got $%04X, want $E005", nmiAddr)
+	}
+	if irqAddr != 0xE006 { // nmi_handler is RTI (1 byte) -> irq_handler is at $E006
+		t.Errorf("irq vector: got $%04X, want $E006", irqAddr)
+	}
+}
+
+func TestLinkMultipleObjects(t *testing.T) {
+	srcA := `
+    .export func_a
+    .import func_b
+
+.bank 0
+func_a:
+    LDA #$01
+    JSR func_b
+    RTS
+`
+	srcB := `
+    .export func_b
+    .import func_a
+
+.bank 0
+func_b:
+    LDA #$02
+    JSR func_a
+    RTS
+`
+	srcC := `
+    .export reset_handler
+    .import func_a
+
+.bank 63
+reset_handler:
+    SEI
+    CLD
+    JSR func_a
+:   JMP :-
+`
+	objA, err := asm.Assemble("fileA.m3", srcA)
+	if err != nil {
+		t.Fatalf("failed to assemble fileA: %v", err)
+	}
+	objB, err := asm.Assemble("fileB.m3", srcB)
+	if err != nil {
+		t.Fatalf("failed to assemble fileB: %v", err)
+	}
+	objC, err := asm.Assemble("fileC.m3", srcC)
+	if err != nil {
+		t.Fatalf("failed to assemble fileC: %v", err)
+	}
+
+	l := NewLinker(objA, objB, objC)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link multiple objects: %v", err)
+	}
+
+	// func_a in Bank 0 starts at $8000: LDA #$01 (2), JSR func_b (3), RTS (1) = 6 bytes
+	// func_b in Bank 0 starts at $8006: LDA #$02 (2), JSR func_a (3), RTS (1) = 6 bytes
+	bank0Offset := INESHeaderSize
+	expectedBank0 := []byte{
+		0xA9, 0x01, // LDA #$01
+		0x20, 0x06, 0x80, // JSR $8006 (func_b)
+		0x60, // RTS
+		0xA9, 0x02, // LDA #$02
+		0x20, 0x00, 0x80, // JSR $8000 (func_a)
+		0x60, // RTS
+	}
+	for i, exp := range expectedBank0 {
+		if rom[bank0Offset+i] != exp {
+			t.Errorf("byte %d in bank 0 mismatch: got 0x%02X, want 0x%02X", i, rom[bank0Offset+i], exp)
+		}
+	}
+
+	// Check reset vector in bank 63
+	bank63Offset := INESHeaderSize + 63*BankSize
+	resetAddr := binary.LittleEndian.Uint16(rom[bank63Offset+ResetVectorOffset : bank63Offset+ResetVectorOffset+2])
+	if resetAddr != 0xE000 {
+		t.Errorf("reset vector = $%04X, want $E000", resetAddr)
+	}
+}
+
+func TestDuplicateSymbolError(t *testing.T) {
+	src1 := `
+    .export dup_func
+.bank 0
+dup_func:
+    RTS
+`
+	src2 := `
+    .export dup_func
+.bank 0
+dup_func:
+    NOP
+    RTS
+`
+	obj1, _ := asm.Assemble("file1.m3", src1)
+	obj2, _ := asm.Assemble("file2.m3", src2)
+
+	l := NewLinker(obj1, obj2)
+	_, err := l.Link()
+	if err == nil {
+		t.Fatal("expected duplicate symbol error, got nil")
+	}
+	if !strings.Contains(err.Error(), "duplicate symbol") {
+		t.Errorf("expected duplicate symbol error message, got: %v", err)
+	}
+}
+
+func TestUndefinedSymbolError(t *testing.T) {
+	src := `
+    .export reset_handler
+    .import missing_func
+.bank 63
+reset_handler:
+    JSR missing_func
+    RTS
+`
+	objFile, _ := asm.Assemble("file.m3", src)
+	l := NewLinker(objFile)
+	_, err := l.Link()
+	if err == nil {
+		t.Fatal("expected undefined symbol error, got nil")
+	}
+	if !strings.Contains(err.Error(), "undefined symbol") {
+		t.Errorf("expected undefined symbol error message, got: %v", err)
+	}
+}
+
+func TestBankOverflowError(t *testing.T) {
+	src := `
+    .export reset_handler
+.bank 0
+large_data:
+    .res 8193, $FF
+
+.bank 63
+reset_handler:
+    RTS
+`
+	objFile, _ := asm.Assemble("overflow.m3", src)
+	l := NewLinker(objFile)
+	_, err := l.Link()
+	if err == nil {
+		t.Fatal("expected bank overflow error, got nil")
+	}
+	if !strings.Contains(err.Error(), "overflow") {
+		t.Errorf("expected overflow error message, got: %v", err)
+	}
+}
+
+func TestRelocationByteSelectors(t *testing.T) {
+	src := `
+    .export reset_handler, test_label
+.bank 1
+test_label:
+    .byte $55
+
+.bank 63
+reset_handler:
+    LDA #<test_label
+    LDX #>test_label
+    LDY #^test_label
+    RTS
+`
+	objFile, err := asm.Assemble("relocs.m3", src)
+	if err != nil {
+		t.Fatalf("assembly failed: %v", err)
+	}
+
+	l := NewLinker(objFile)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("linking failed: %v", err)
+	}
+
+	bank63Offset := INESHeaderSize + 63*BankSize
+	// test_label in Bank 1 is at offset 0 (address = 0)
+	// LDA #<test_label -> A9 00
+	// LDX #>test_label -> A2 00
+	// LDY #^test_label -> A0 01 (Bank 1)
+	// RTS              -> 60
+	expectedBank63 := []byte{
+		0xA9, 0x00, // LDA #<0 = 0
+		0xA2, 0x00, // LDX #>0 = 0
+		0xA0, 0x01, // LDY #^test_label = 1 (Bank 1)
+		0x60, // RTS
+	}
+	for i, exp := range expectedBank63 {
+		if rom[bank63Offset+i] != exp {
+			t.Errorf("byte %d in bank 63 mismatch: got 0x%02X, want 0x%02X", i, rom[bank63Offset+i], exp)
+		}
+	}
+}
+
+func TestLinkHelloWorldExample(t *testing.T) {
+	hwPath := filepath.Join("..", "..", "examples", "hello_world.m3")
+	content, err := os.ReadFile(hwPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", hwPath, err)
+	}
+
+	objFile, err := asm.Assemble(hwPath, string(content))
+	if err != nil {
+		t.Fatalf("failed to assemble hello_world.m3: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	nesPath := filepath.Join(tmpDir, "hello_world.nes")
+
+	l := NewLinker(objFile)
+	romData, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link hello_world: %v", err)
+	}
+
+	if err := os.WriteFile(nesPath, romData, 0644); err != nil {
+		t.Fatalf("failed to write hello_world.nes: %v", err)
+	}
+
+	info, err := os.Stat(nesPath)
+	if err != nil {
+		t.Fatalf("failed to stat hello_world.nes: %v", err)
+	}
+	if info.Size() != int64(TotalOutputSize) {
+		t.Fatalf("expected file size %d, got %d", TotalOutputSize, info.Size())
+	}
+}
+
+func TestLinkRAMSegments(t *testing.T) {
+	srcA := `
+    .export px, py, ram_buf, wram_save
+.zp
+px: .res 1
+py: .res 2
+
+.ram
+ram_buf: .res 64
+
+.wram
+wram_save: .res 128
+`
+	srcB := `
+    .export ex, ey, main, reset_handler
+    .importzp px, py
+    .import ram_buf, wram_save
+.zp
+ex: .res 1
+ey: .res 1
+
+.bank 0
+main:
+    LDA px
+    STA ex
+    LDA ram_buf
+    STA wram_save
+    RTS
+
+.bank 63
+reset_handler:
+    JMP main
+`
+	objA, err := asm.Assemble("fileA.m3", srcA)
+	if err != nil {
+		t.Fatalf("failed to assemble fileA: %v", err)
+	}
+	objB, err := asm.Assemble("fileB.m3", srcB)
+	if err != nil {
+		t.Fatalf("failed to assemble fileB: %v", err)
+	}
+
+	l := NewLinker(objA, objB)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link RAM segments: %v", err)
+	}
+
+	// Verify battery-backed flag is set in flags 6 (bit 1)
+	if rom[6]&0x02 == 0 {
+		t.Errorf("expected battery-backed flag (bit 1) to be set in flags6, got 0x%02X", rom[6])
+	}
+
+	// Verify Bank 0 machine code:
+	// LDA px ($00)        -> A5 00
+	// STA ex ($03)        -> 85 03 (fileA used 3 bytes: px(1) + py(2) = 3 bytes -> fileB starts at $03)
+	// LDA ram_buf ($0300) -> AD 00 03
+	// STA wram_save ($6000)-> 8D 00 60
+	// RTS                 -> 60
+	bank0Offset := INESHeaderSize
+	expectedBank0 := []byte{
+		0xA5, 0x00, // LDA $00 (px)
+		0x85, 0x03, // STA $03 (ex)
+		0xAD, 0x00, 0x03, // LDA $0300 (ram_buf)
+		0x8D, 0x00, 0x60, // STA $6000 (wram_save)
+		0x60, // RTS
+	}
+	for i, exp := range expectedBank0 {
+		if rom[bank0Offset+i] != exp {
+			t.Errorf("byte %d in bank 0 mismatch: got 0x%02X, want 0x%02X", i, rom[bank0Offset+i], exp)
+		}
+	}
+}
+
+func TestZPOverflow(t *testing.T) {
+	src := `
+    .export reset_handler
+.zp
+large_zp: .res 257
+.bank 63
+reset_handler:
+    RTS
+`
+	objFile, err := asm.Assemble("zp_overflow.m3", src)
+	if err != nil {
+		t.Fatalf("failed to assemble: %v", err)
+	}
+	l := NewLinker(objFile)
+	_, err = l.Link()
+	if err == nil {
+		t.Fatal("expected ZP overflow error, got nil")
+	}
+	if !strings.Contains(err.Error(), "zero page overflow") {
+		t.Errorf("expected zero page overflow error message, got: %v", err)
+	}
+}
+
+func TestRAMOverflow(t *testing.T) {
+	src := `
+    .export reset_handler
+.ram
+large_ram: .res 1281
+.bank 63
+reset_handler:
+    RTS
+`
+	objFile, err := asm.Assemble("ram_overflow.m3", src)
+	if err != nil {
+		t.Fatalf("failed to assemble: %v", err)
+	}
+	l := NewLinker(objFile)
+	_, err = l.Link()
+	if err == nil {
+		t.Fatal("expected RAM overflow error, got nil")
+	}
+	if !strings.Contains(err.Error(), "main RAM overflow") {
+		t.Errorf("expected main RAM overflow error message, got: %v", err)
+	}
+}
+
+func TestWRAMOverflow(t *testing.T) {
+	src := `
+    .export reset_handler
+.wram
+large_wram: .res 8193
+.bank 63
+reset_handler:
+    RTS
+`
+	objFile, err := asm.Assemble("wram_overflow.m3", src)
+	if err != nil {
+		t.Fatalf("failed to assemble: %v", err)
+	}
+	l := NewLinker(objFile)
+	_, err = l.Link()
+	if err == nil {
+		t.Fatal("expected WRAM overflow error, got nil")
+	}
+	if !strings.Contains(err.Error(), "work RAM overflow") {
+		t.Errorf("expected work RAM overflow error message, got: %v", err)
+	}
+}
