@@ -270,7 +270,7 @@ tiles:
 }
 
 func TestAssembleHelloWorldExample(t *testing.T) {
-	hwPath := filepath.Join("..", "..", "examples", "hello_world.m3")
+	hwPath := filepath.Join("..", "..", "examples", "hello_world.s")
 	content, err := os.ReadFile(hwPath)
 	if err != nil {
 		t.Fatalf("failed to read %s: %v", hwPath, err)
@@ -278,7 +278,7 @@ func TestAssembleHelloWorldExample(t *testing.T) {
 
 	objFile, err := Assemble(hwPath, string(content))
 	if err != nil {
-		t.Fatalf("failed to assemble hello_world.m3: %v", err)
+		t.Fatalf("failed to assemble hello_world.s: %v", err)
 	}
 
 	if len(objFile.Banks) != 3 {
@@ -367,3 +367,80 @@ start:
 		t.Errorf("expected STA ZeroPage (0x85), got 0x%02X", bank0.Data[2])
 	}
 }
+
+func TestAssembleAutoBank(t *testing.T) {
+	src := `
+    .export auto_func1, auto_func2, auto_data
+.bank auto
+auto_func1:
+    LDA #$42
+    RTS
+
+.bank auto
+auto_func2:
+    JSR auto_func1
+    RTS
+
+auto_data:
+    .byte $11, $22, $33
+`
+	objFile, err := Assemble("auto_test.s", src)
+	if err != nil {
+		t.Fatalf("assembly failed: %v", err)
+	}
+
+	if len(objFile.Banks) != 1 {
+		t.Fatalf("expected 1 bank chunk, got %d", len(objFile.Banks))
+	}
+	if objFile.Banks[0].BankIndex != obj.BankAutoIndex {
+		t.Fatalf("expected bank index to be BankAutoIndex, got %d", objFile.Banks[0].BankIndex)
+	}
+
+	symMap := make(map[string]obj.Symbol)
+	for _, s := range objFile.Symbols {
+		symMap[s.Name] = s
+	}
+
+	if s, ok := symMap["auto_func1"]; !ok || s.Bank != obj.BankAuto || s.Value != 0 {
+		t.Errorf("auto_func1 invalid: %+v", s)
+	}
+	if s, ok := symMap["auto_func2"]; !ok || s.Bank != obj.BankAuto || s.Value != 3 {
+		t.Errorf("auto_func2 invalid: %+v", s)
+	}
+	if s, ok := symMap["auto_data"]; !ok || s.Bank != obj.BankAuto || s.Value != 7 {
+		t.Errorf("auto_data invalid: %+v", s)
+	}
+}
+
+func TestAssembleAutoBankLocalBranches(t *testing.T) {
+	src := `
+.bank auto
+loop:
+    DEX
+    BNE loop
+    RTS
+`
+	objFile, err := Assemble("branch_test.s", src)
+	if err != nil {
+		t.Fatalf("assembly failed: %v", err)
+	}
+
+	if len(objFile.Banks) != 1 {
+		t.Fatalf("expected 1 bank chunk, got %d", len(objFile.Banks))
+	}
+
+	data := objFile.Banks[0].Data
+	// DEX = CA
+	// BNE loop -> D0 FD (-3 bytes)
+	// RTS = 60
+	expected := []byte{0xCA, 0xD0, 0xFD, 0x60}
+	if len(data) != len(expected) {
+		t.Fatalf("expected %d bytes, got %d", len(expected), len(data))
+	}
+	for i, b := range expected {
+		if data[i] != b {
+			t.Errorf("byte %d: got 0x%02X, want 0x%02X", i, data[i], b)
+		}
+	}
+}
+

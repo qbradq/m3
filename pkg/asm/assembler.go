@@ -88,6 +88,13 @@ func (a *Assembler) LookupSymbol(name string) (int64, int, bool) {
 	return sym.val, int(sym.bank), true
 }
 
+func (a *Assembler) currentBankInt32() int32 {
+	if a.currentBank == obj.BankAutoIndex {
+		return obj.BankAuto
+	}
+	return int32(a.currentBank)
+}
+
 func (a *Assembler) Run() (*obj.ObjectFile, error) {
 	// Pass 1: Handle symbols, labels, scopes, and calculate sizes/offsets
 	if err := a.pass1(); err != nil {
@@ -187,11 +194,15 @@ func (a *Assembler) pass1() error {
 
 		case *BankDirective:
 			a.currentSegment = SegmentPRG
-			val, err := s.BankIndex.Eval(a)
-			if err != nil {
-				return fmt.Errorf("%s: bank index must be a constant expression in pass 1: %w", s.Pos(), err)
+			if s.IsAuto {
+				a.currentBank = obj.BankAutoIndex
+			} else {
+				val, err := s.BankIndex.Eval(a)
+				if err != nil {
+					return fmt.Errorf("%s: bank index must be a constant expression in pass 1: %w", s.Pos(), err)
+				}
+				a.currentBank = uint32(val)
 			}
-			a.currentBank = uint32(val)
 
 		case *ExportDirective:
 			for _, name := range s.Names {
@@ -234,7 +245,11 @@ func (a *Assembler) pass1() error {
 			switch a.currentSegment {
 			case SegmentPRG:
 				currentOffset = bankOffsets[a.currentBank]
-				currentBank = int32(a.currentBank)
+				if a.currentBank == obj.BankAutoIndex {
+					currentBank = obj.BankAuto
+				} else {
+					currentBank = int32(a.currentBank)
+				}
 			case SegmentZP:
 				currentOffset = a.zpOffset
 				currentBank = obj.BankZP
@@ -494,8 +509,12 @@ func (a *Assembler) pass2() error {
 
 		case *BankDirective:
 			a.currentSegment = SegmentPRG
-			val, _ := s.BankIndex.Eval(a)
-			a.currentBank = uint32(val)
+			if s.IsAuto {
+				a.currentBank = obj.BankAutoIndex
+			} else {
+				val, _ := s.BankIndex.Eval(a)
+				a.currentBank = uint32(val)
+			}
 
 		case *ScopeDirective:
 			if s.IsEnd {
@@ -665,7 +684,7 @@ func (a *Assembler) emitInstruction(inst *InstructionStmt, stmtIdx int, currentG
 	case cpu6502.ModeRelative:
 		// Check if local or global label defined in this chunk
 		symName := a.symbolName(inst.Operand, currentGlobal)
-		if sym, ok := a.symbols[symName]; ok && sym.sTyp == obj.SymbolTypeLabel && sym.bank == int32(a.currentBank) {
+		if sym, ok := a.symbols[symName]; ok && sym.sTyp == obj.SymbolTypeLabel && sym.bank == a.currentBankInt32() {
 			pcAfter := currentOffset + 2
 			disp := sym.val - int64(pcAfter)
 			if disp < -128 || disp > 127 {
@@ -1005,7 +1024,7 @@ func (a *Assembler) isConstantExpr(expr Expr, currentGlobal string) (int64, bool
 			if nameL != "" && nameR != "" {
 				sL, okL := a.symbols[nameL]
 				sR, okR := a.symbols[nameR]
-				if okL && okR && sL.sTyp == obj.SymbolTypeLabel && sR.sTyp == obj.SymbolTypeLabel && sL.bank == sR.bank && sL.bank >= 0 {
+				if okL && okR && sL.sTyp == obj.SymbolTypeLabel && sR.sTyp == obj.SymbolTypeLabel && sL.bank == sR.bank && (sL.bank >= 0 || sL.bank == obj.BankAuto) {
 					return sL.val - sR.val, true
 				}
 			}

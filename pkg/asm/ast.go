@@ -36,9 +36,10 @@ type InstructionStmt struct {
 
 func (i *InstructionStmt) Pos() Position { return i.pos }
 
-// BankDirective: .bank <expr>
+// BankDirective: .bank <expr> or .bank auto
 type BankDirective struct {
 	BankIndex Expr
+	IsAuto    bool
 	pos       Position
 }
 

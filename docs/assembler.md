@@ -139,9 +139,11 @@ The `.bank` directive informs the assembler which 8KB bank the following symbols
 
 ```assembly
 .bank <bank_index>
+.bank auto
 ```
 
 - `<bank_index>`: An integer expression specifying the 8KB PRG bank number (e.g., `0` to `63` depending on ROM size).
+- `auto`: Flags the symbols and code defined in this file to be placed automatically into an available 8KB PRG bank at link time. All `.bank auto` symbols and code within a single assembly file are guaranteed to be placed within the same bank at link time.
 - All labels and data defined after a `.bank` directive will inherit that bank context.
 - The bank index is accessible via the `^` byte operator on symbols defined in that bank.
 
@@ -150,6 +152,10 @@ Example:
 .bank 0
 dialog_table:
     .asciiz "Welcome to the world of m3!"
+
+.bank auto
+compressed_level_data:
+    .incbin "assets/level1.bin"
 
 .bank 1
 music_track_0:
@@ -445,7 +451,7 @@ Directive       = BankDir
                 | MacroDir
                 | IncludeDir ;
 
-BankDir         = ".bank" Expression ;
+BankDir         = ".bank" ( Expression | "auto" ) ;
 MemoryDir       = ( ".zp" | ".zeropage" | ".ram" | ".bss" | ".wram" | ".prgram" | ".sram" ) [ Expression ] ;
 DataDir         = ( ".byte" | ".byt" | ".db" ) ExpressionList
                 | ( ".word" | ".addr" | ".dw" ) ExpressionList

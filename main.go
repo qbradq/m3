@@ -49,7 +49,7 @@ func printUsage() {
 	fmt.Println("Usage: m3 <command> [arguments]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  assemble <input.m3> [output.mo]      Assemble an m3 assembly file into an intermediate object file")
+	fmt.Println("  assemble <input.s> [output.mo]       Assemble an assembly file into an intermediate object file")
 	fmt.Println("  link <input.mo...> [output.nes]      Link one or more object files into an NES ROM (.nes)")
 	fmt.Println("  dump-obj <file.mo>                   Inspect and dump the contents of an object file")
 	fmt.Println("  version                              Display the m3 version")
@@ -58,7 +58,7 @@ func printUsage() {
 
 func handleAssemble(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("missing input file\nUsage: m3 assemble <input.m3> [output.mo]")
+		return fmt.Errorf("missing input file\nUsage: m3 assemble <input.s> [output.mo]")
 	}
 
 	inputFile := args[0]

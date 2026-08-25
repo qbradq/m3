@@ -80,21 +80,23 @@ type chunkPlacement struct {
 
 // Linker coordinates the linking of multiple object files into a single NES ROM.
 type Linker struct {
-	config     Config
-	objects    []*obj.ObjectFile
-	banks      [NumBanks][]byte
-	placements []chunkPlacement
-	globalSyms map[string]*resolvedSymbol
-	localSyms  map[symbolKey]*resolvedSymbol
+	config       Config
+	objects      []*obj.ObjectFile
+	banks        [NumBanks][]byte
+	placements   []chunkPlacement
+	fileAutoBank map[int]uint32
+	globalSyms   map[string]*resolvedSymbol
+	localSyms    map[symbolKey]*resolvedSymbol
 }
 
 // NewLinker creates a new Linker instance.
 func NewLinker(objects ...*obj.ObjectFile) *Linker {
 	return &Linker{
-		config:     DefaultConfig(),
-		objects:    objects,
-		globalSyms: make(map[string]*resolvedSymbol),
-		localSyms:  make(map[symbolKey]*resolvedSymbol),
+		config:       DefaultConfig(),
+		objects:      objects,
+		fileAutoBank: make(map[int]uint32),
+		globalSyms:   make(map[string]*resolvedSymbol),
+		localSyms:    make(map[symbolKey]*resolvedSymbol),
 	}
 }
 
@@ -111,8 +113,13 @@ func (l *Linker) Link() ([]byte, error) {
 
 	// 2. Place chunks and record chunk base offsets
 	bankUsage := make([]uint32, NumBanks)
+
+	// Step 2a: Place explicit fixed banks
 	for fileIdx, objFile := range l.objects {
 		for _, chunk := range objFile.Banks {
+			if chunk.BankIndex == obj.BankAutoIndex {
+				continue
+			}
 			if chunk.BankIndex >= NumBanks {
 				return nil, fmt.Errorf("linker error: %s has bank index %d exceeding maximum supported %d",
 					objFile.SourceFile, chunk.BankIndex, NumBanks-1)
@@ -136,6 +143,46 @@ func (l *Linker) Link() ([]byte, error) {
 				startOffset: startOffset,
 				chunk:       chunk,
 			})
+		}
+	}
+
+	// Step 2b: Place auto-allocated chunks (all auto symbols/code per file in same bank)
+	for fileIdx, objFile := range l.objects {
+		for _, chunk := range objFile.Banks {
+			if chunk.BankIndex != obj.BankAutoIndex {
+				continue
+			}
+
+			chunkLen := uint32(len(chunk.Data))
+			if chunkLen > BankSize {
+				return nil, fmt.Errorf("linker error: auto bank in %s exceeds bank limit of %d bytes (size %d bytes)",
+					objFile.SourceFile, BankSize, chunkLen)
+			}
+
+			var assignedBank uint32 = NumBanks
+			for b := uint32(0); b < NumBanks; b++ {
+				if bankUsage[b]+chunkLen <= BankSize {
+					assignedBank = b
+					break
+				}
+			}
+
+			if assignedBank == NumBanks {
+				return nil, fmt.Errorf("linker error: no bank with enough space (%d bytes needed) for auto-placed code in %s",
+					chunkLen, objFile.SourceFile)
+			}
+
+			startOffset := bankUsage[assignedBank]
+			copy(l.banks[assignedBank][startOffset:], chunk.Data)
+			bankUsage[assignedBank] += chunkLen
+
+			l.placements = append(l.placements, chunkPlacement{
+				fileIndex:   fileIdx,
+				bankIndex:   assignedBank,
+				startOffset: startOffset,
+				chunk:       chunk,
+			})
+			l.fileAutoBank[fileIdx] = assignedBank
 		}
 	}
 
@@ -253,6 +300,7 @@ func (l *Linker) collectSymbols() error {
 			var finalOffset uint32
 			var addr int64
 
+			var resolvedSymBank = sym.Bank
 			switch sym.Bank {
 			case obj.BankConst:
 				addr = sym.Value
@@ -265,6 +313,16 @@ func (l *Linker) collectSymbols() error {
 			case obj.BankWRAM:
 				finalOffset = fileWRAMBase[fileIdx] + uint32(sym.Value)
 				addr = int64(WRAMBaseAddr + finalOffset)
+			case obj.BankAuto:
+				assignedBank, ok := l.fileAutoBank[fileIdx]
+				if !ok {
+					return fmt.Errorf("linker error: auto bank not assigned for symbol %q in %s", sym.Name, objFile.SourceFile)
+				}
+				chunkOffset := l.getChunkOffset(fileIdx, assignedBank)
+				finalOffset = chunkOffset + uint32(sym.Value)
+				baseAddr := BankBaseAddress(assignedBank)
+				addr = baseAddr + int64(finalOffset)
+				resolvedSymBank = int32(assignedBank)
 			default:
 				if sym.Bank >= 0 {
 					chunkOffset := l.getChunkOffset(fileIdx, uint32(sym.Bank))
@@ -280,7 +338,7 @@ func (l *Linker) collectSymbols() error {
 				Name:         sym.Name,
 				Type:         sym.Type,
 				Scope:        sym.Scope,
-				Bank:         sym.Bank,
+				Bank:         resolvedSymBank,
 				OffsetInBank: finalOffset,
 				Address:      addr,
 				FileIndex:    fileIdx,

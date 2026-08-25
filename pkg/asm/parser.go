@@ -230,6 +230,12 @@ func (p *Parser) parseBankDirective() (Statement, error) {
 	if err := p.nextToken(); err != nil {
 		return nil, err
 	}
+	if p.curTokenIs(TokenIdent) && strings.ToLower(p.curTok.Literal) == "auto" {
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+		return &BankDirective{IsAuto: true, pos: pos}, nil
+	}
 	bankExpr, err := p.parseExpression()
 	if err != nil {
 		return nil, err

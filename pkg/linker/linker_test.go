@@ -289,7 +289,7 @@ reset_handler:
 }
 
 func TestLinkHelloWorldExample(t *testing.T) {
-	hwPath := filepath.Join("..", "..", "examples", "hello_world.m3")
+	hwPath := filepath.Join("..", "..", "examples", "hello_world.s")
 	content, err := os.ReadFile(hwPath)
 	if err != nil {
 		t.Fatalf("failed to read %s: %v", hwPath, err)
@@ -297,7 +297,7 @@ func TestLinkHelloWorldExample(t *testing.T) {
 
 	objFile, err := asm.Assemble(hwPath, string(content))
 	if err != nil {
-		t.Fatalf("failed to assemble hello_world.m3: %v", err)
+		t.Fatalf("failed to assemble hello_world.s: %v", err)
 	}
 
 	tmpDir := t.TempDir()
@@ -464,3 +464,146 @@ reset_handler:
 		t.Errorf("expected work RAM overflow error message, got: %v", err)
 	}
 }
+
+func TestLinkAutoBank(t *testing.T) {
+	src := `
+    .export reset_handler, auto_func
+.bank auto
+auto_func:
+    LDA #$42
+    RTS
+
+.bank 63
+reset_handler:
+    JSR auto_func
+    LDA #^auto_func
+    RTS
+`
+	objFile, err := asm.Assemble("auto.s", src)
+	if err != nil {
+		t.Fatalf("failed to assemble auto.s: %v", err)
+	}
+
+	l := NewLinker(objFile)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link auto object: %v", err)
+	}
+
+	// auto_func should be placed in Bank 0 at $8000: LDA #$42 (A9 42), RTS (60)
+	bank0Offset := INESHeaderSize
+	expectedBank0 := []byte{0xA9, 0x42, 0x60}
+	for i, exp := range expectedBank0 {
+		if rom[bank0Offset+i] != exp {
+			t.Errorf("byte %d in bank 0 mismatch: got 0x%02X, want 0x%02X", i, rom[bank0Offset+i], exp)
+		}
+	}
+
+	// Bank 63 at reset_handler: JSR $8000 (20 00 80), LDA #^auto_func (A9 00), RTS (60)
+	bank63Offset := INESHeaderSize + 63*BankSize
+	expectedBank63 := []byte{0x20, 0x00, 0x80, 0xA9, 0x00, 0x60}
+	for i, exp := range expectedBank63 {
+		if rom[bank63Offset+i] != exp {
+			t.Errorf("byte %d in bank 63 mismatch: got 0x%02X, want 0x%02X", i, rom[bank63Offset+i], exp)
+		}
+	}
+}
+
+func TestLinkMultipleAutoBanks(t *testing.T) {
+	// File A fills Bank 0 almost completely (8190 bytes)
+	srcA := `
+.bank 0
+fill_data:
+    .res 8190, $EA
+`
+	// File B has auto bank of 100 bytes (cannot fit in Bank 0, should go to Bank 1)
+	srcB := `
+    .export auto_b
+.bank auto
+auto_b:
+    .res 100, $BB
+`
+	// File C has auto bank of 50 bytes (fits into Bank 1 alongside File B)
+	srcC := `
+    .export auto_c
+.bank auto
+auto_c:
+    .res 50, $CC
+`
+	// File D references auto_b and auto_c bank bytes
+	srcD := `
+    .export reset_handler
+    .import auto_b, auto_c
+.bank 63
+reset_handler:
+    LDA #^auto_b
+    LDX #^auto_c
+    RTS
+`
+	objA, err := asm.Assemble("fileA.s", srcA)
+	if err != nil {
+		t.Fatalf("failed to assemble fileA: %v", err)
+	}
+	objB, err := asm.Assemble("fileB.s", srcB)
+	if err != nil {
+		t.Fatalf("failed to assemble fileB: %v", err)
+	}
+	objC, err := asm.Assemble("fileC.s", srcC)
+	if err != nil {
+		t.Fatalf("failed to assemble fileC: %v", err)
+	}
+	objD, err := asm.Assemble("fileD.s", srcD)
+	if err != nil {
+		t.Fatalf("failed to assemble fileD: %v", err)
+	}
+
+	l := NewLinker(objA, objB, objC, objD)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link: %v", err)
+	}
+
+	// Bank 1 should contain auto_b ($BB x 100) then auto_c ($CC x 50)
+	bank1Offset := INESHeaderSize + 1*BankSize
+	if rom[bank1Offset] != 0xBB || rom[bank1Offset+99] != 0xBB {
+		t.Errorf("expected auto_b in Bank 1 at offset 0, got 0x%02X", rom[bank1Offset])
+	}
+	if rom[bank1Offset+100] != 0xCC || rom[bank1Offset+149] != 0xCC {
+		t.Errorf("expected auto_c in Bank 1 at offset 100, got 0x%02X", rom[bank1Offset+100])
+	}
+
+	// Bank 63 reset_handler: LDA #$01 (A9 01), LDX #$01 (A2 01), RTS (60)
+	bank63Offset := INESHeaderSize + 63*BankSize
+	expectedBank63 := []byte{0xA9, 0x01, 0xA2, 0x01, 0x60}
+	for i, exp := range expectedBank63 {
+		if rom[bank63Offset+i] != exp {
+			t.Errorf("byte %d in bank 63 mismatch: got 0x%02X, want 0x%02X", i, rom[bank63Offset+i], exp)
+		}
+	}
+}
+
+func TestLinkAutoBankOverflow(t *testing.T) {
+	src := `
+    .export reset_handler
+.bank auto
+large_auto:
+    .res 8193, $00
+.bank 63
+reset_handler:
+    RTS
+`
+	objFile, err := asm.Assemble("overflow_auto.s", src)
+	if err != nil {
+		t.Fatalf("failed to assemble: %v", err)
+	}
+
+	l := NewLinker(objFile)
+	_, err = l.Link()
+	if err == nil {
+		t.Fatal("expected auto bank overflow error, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds bank limit") {
+		t.Errorf("expected exceeds bank limit error message, got: %v", err)
+	}
+}
+

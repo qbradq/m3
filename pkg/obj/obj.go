@@ -87,6 +87,9 @@ const (
 	BankZP    int32 = -2
 	BankRAM   int32 = -3
 	BankWRAM  int32 = -4
+	BankAuto  int32 = -5
+
+	BankAutoIndex uint32 = 0xFFFFFFFF
 )
 
 type Symbol struct {
@@ -368,7 +371,11 @@ func (o *ObjectFile) Dump() string {
 	}
 	fmt.Fprintf(&buf, "Banks (%d):\n", len(o.Banks))
 	for _, b := range o.Banks {
-		fmt.Fprintf(&buf, "  Bank %d: %d bytes, %d relocations\n", b.BankIndex, len(b.Data), len(b.Relocations))
+		bankStr := fmt.Sprintf("%d", b.BankIndex)
+		if b.BankIndex == BankAutoIndex {
+			bankStr = "AUTO"
+		}
+		fmt.Fprintf(&buf, "  Bank %s: %d bytes, %d relocations\n", bankStr, len(b.Data), len(b.Relocations))
 		for _, r := range b.Relocations {
 			fmt.Fprintf(&buf, "    offset=$%04X type=%-10s sym=%s addend=%d\n", r.Offset, r.Type, r.Symbol, r.Addend)
 		}
