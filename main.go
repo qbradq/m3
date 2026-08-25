@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/qbradq/m3/pkg/asm"
+	"github.com/qbradq/m3/pkg/compiler"
 	"github.com/qbradq/m3/pkg/linker"
 	"github.com/qbradq/m3/pkg/obj"
 )
@@ -19,6 +20,11 @@ func main() {
 
 	command := os.Args[1]
 	switch command {
+	case "compile":
+		if err := handleCompile(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "m3 compile error: %v\n", err)
+			os.Exit(1)
+		}
 	case "assemble":
 		if err := handleAssemble(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "m3 assemble error: %v\n", err)
@@ -49,11 +55,34 @@ func printUsage() {
 	fmt.Println("Usage: m3 <command> [arguments]")
 	fmt.Println()
 	fmt.Println("Commands:")
+	fmt.Println("  compile <input.m3> [output.s]        Compile an m3 source file into an assembly file")
 	fmt.Println("  assemble <input.s> [output.mo]       Assemble an assembly file into an intermediate object file")
 	fmt.Println("  link <input.mo...> [output.nes]      Link one or more object files into an NES ROM (.nes)")
 	fmt.Println("  dump-obj <file.mo>                   Inspect and dump the contents of an object file")
 	fmt.Println("  version                              Display the m3 version")
 	fmt.Println("  help                                 Display this help message")
+}
+
+func handleCompile(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("missing input file\nUsage: m3 compile <input.m3> [output.s]")
+	}
+
+	inputFile := args[0]
+	outputFile := ""
+	if len(args) >= 2 {
+		outputFile = args[1]
+	} else {
+		// Default output file to same base with .s extension
+		ext := filepath.Ext(inputFile)
+		if ext != "" {
+			outputFile = strings.TrimSuffix(inputFile, ext) + ".s"
+		} else {
+			outputFile = inputFile + ".s"
+		}
+	}
+
+	return compiler.CompileFile(inputFile, outputFile)
 }
 
 func handleAssemble(args []string) error {

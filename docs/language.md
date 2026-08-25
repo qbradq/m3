@@ -48,14 +48,50 @@ The NES contains limited internal memory and relies on mapper hardware for bank 
 
 ---
 
-## 2. Lexical Structure & Comments
+## 2. Source Organization, Scoping, and Imports
 
-### 2.1 Identifiers
+### 2.1 Source Files and Compilation Units
+`m3` source files use the `.m3` extension. Each source file represents a distinct compilation unit that compiles to an object file (`.o`) or assembly output (`.s`).
+
+### 2.2 The `import` Keyword
+The `import` statement allows a source file to import other `.m3` files by **relative path** (relative to the file containing the `import` statement). 
+
+Importing a file pulls all of its **exported symbols** (types, constants, variables, functions) into the current compilation unit as imported symbols.
+
+```go
+// Single import
+import "math/vector.m3"
+
+// Relative paths
+import "../common/constants.m3"
+
+// Grouped imports
+import (
+    "types.m3"
+    "audio/driver.m3"
+    "entities/actors.m3"
+)
+```
+
+- Paths are enclosed in double quotes and use forward slashes (`/`).
+- Imported symbols become directly accessible in the file's scope.
+- During code generation, references to imported variables and functions generate external symbol references (`.import` in assembly).
+
+### 2.3 Symbol Scoping and Visibility
+Symbol visibility follows Go conventions:
+- **Exported Symbols**: Identifiers with an **uppercase** first letter (e.g., `PlayerX`, `InitActors`, `EnemyCount`) are exported and made available to other files that `import` this file.
+- **Internal / Private Symbols**: Identifiers with a **lowercase** first letter or an underscore (e.g., `frame_count`, `local_temp`, `_hidden`) are private to the compilation unit.
+
+### 2.4 Assembly Symbol Mangling
+To facilitate clean interoperability with assembly routines and avoid collisions with 6502 instructions or hardware registers:
+- All identifiers are prepended with an underscore (`_`) when emitted to assembly.
+- For example, `Main` becomes `_Main`, `player_x` becomes `_player_x`, and `InitActors` becomes `_InitActors`.
+
+### 2.5 Identifiers
 - Identifiers must start with a letter (`a-z`, `A-Z`) or an underscore (`_`), followed by any combination of letters, digits (`0-9`), and underscores.
 - Identifiers are case-sensitive.
-- Identifiers beginning with a capital letter or declared with `export` are accessible across compilation units.
 
-### 2.2 Comments
+### 2.6 Comments
 `m3` supports both line comments and block comments:
 ```go
 // This is a single-line comment
@@ -66,7 +102,7 @@ The NES contains limited internal memory and relies on mapper hardware for bank 
 */
 ```
 
-### 2.3 Literals
+### 2.7 Literals
 - **Decimal**: `0`, `42`, `255`, `65535`
 - **Hexadecimal**: `$FF`, `$8000` or `0xFF`, `0x8000`
 - **Binary**: `%11001010` or `0b11001010`
@@ -248,8 +284,10 @@ func identifier(param1 type, param2 type) return_type [bank n] {
 }
 ```
 
-- **Parameters & Returns**: Types must be explicit. Multiple return values are supported (returned in registers / scratchpad).
+- **Parameters & Returns**: Parameter lists take the form `identifier type, ...`. Types must be explicit. Variadic arguments (`...`) are not supported.
 - **`bank` Specifier**: Specifies which PRG-ROM bank contains this function. If omitted, defaults to `bank auto`.
+- **Non-Reentrancy**: Functions are strictly **non-reentrant**. A function calling itself directly or indirectly is a compile-time error.
+- **Memory Allocation**: Function parameters and local variables are allocated statically in RAM / Zero Page scratchpad rather than on a dynamic call stack.
 
 ### 7.2 Calling Conventions & Register Fastcall
 
@@ -351,17 +389,20 @@ default:
 
 ## 9. Operators & Expressions
 
-### 9.1 Arithmetic Operators
+### 9.1 Constant Expressions vs Variable Expressions
+- **Compile-Time Constant Expressions**: For constant expressions (evaluated entirely at compile time), `m3` supports all standard math operators: `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `<<`, `>>`, and parenthesized sub-expressions.
+- **Runtime Variable Expressions**: For expressions involving runtime variables (translated into 6502 machine instructions), only operations native to the 6502 architecture are supported directly in expressions (such as addition `+`, subtraction `-`, bitwise operations `&`, `|`, `^`, bit clear `&^`, bit shifts `<<`, `>>`, and increment/decrement `++`, `--`).
+
+### 9.2 Arithmetic Operators
 | Operator | Description | 6502 Implementation Note |
 | :--- | :--- | :--- |
 | `+` | Addition | Emits `CLC; ADC` |
 | `-` | Subtraction | Emits `SEC; SBC` |
-| `*` | Multiplication | Unsigned shift-and-add loop or hardware helper |
-| `/` | Division | Fast shift-based division routine |
-| `%` | Modulo | Fast remainder routine |
 | `++`, `--` | Increment / Decrement | Emits `INC` / `DEC` or `INX` / `DEX` |
 
-### 9.2 Bitwise Operators
+*(Note: Multiplication and division between variables are not native 6502 instructions; use bit-shifts or dedicated library helper routines).*
+
+### 9.3 Bitwise Operators
 | Operator | Description | 6502 Instruction |
 | :--- | :--- | :--- |
 | `&` | Bitwise AND | `AND` |
@@ -371,7 +412,7 @@ default:
 | `<<` | Shift Left | `ASL` |
 | `>>` | Shift Right | `LSR` (unsigned) or `ROR` / arithmetic |
 
-### 9.3 Byte and Address Extraction Built-ins
+### 9.4 Byte and Address Extraction Built-ins
 For interfacing with 16-bit addresses and banked assets:
 
 - `low(val)` or `<val`: Extracts the low byte (`val & $FF`).
