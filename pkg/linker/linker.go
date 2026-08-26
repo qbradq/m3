@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/qbradq/m3/pkg/asm"
+	"github.com/qbradq/m3/pkg/data"
 	"github.com/qbradq/m3/pkg/obj"
 )
 
@@ -87,6 +89,7 @@ type Linker struct {
 	fileAutoBank map[int]uint32
 	globalSyms   map[string]*resolvedSymbol
 	localSyms    map[symbolKey]*resolvedSymbol
+	usingMrt0    bool
 }
 
 // NewLinker creates a new Linker instance.
@@ -104,6 +107,11 @@ func NewLinker(objects ...*obj.ObjectFile) *Linker {
 func (l *Linker) Link() ([]byte, error) {
 	if len(l.objects) == 0 {
 		return nil, fmt.Errorf("linker error: no object files provided")
+	}
+
+	// 0. Inject runtime (mrt0.s) if reset_handler is not provided
+	if err := l.ensureRuntime(); err != nil {
+		return nil, err
 	}
 
 	// 1. Initialize bank buffers
@@ -357,6 +365,86 @@ func (l *Linker) collectSymbols() error {
 			l.localSyms[symbolKey{fileIdx: fileIdx, name: sym.Name}] = resolved
 		}
 	}
+
+	// Handle main entry point
+	mainSym, hasMain := l.globalSyms["_main"]
+	if !hasMain {
+		mainSym, hasMain = l.globalSyms["main"]
+	}
+	if l.usingMrt0 && !hasMain {
+		return fmt.Errorf("linker error: undefined symbol \"main\" (entry point required)")
+	}
+	if hasMain {
+		if _, ok := l.globalSyms["_main"]; !ok {
+			l.globalSyms["_main"] = mainSym
+		}
+		if _, ok := l.globalSyms["main"]; !ok {
+			l.globalSyms["main"] = mainSym
+		}
+	}
+
+	// Handle NMI interrupt routine
+	nmiSym, hasNMI := l.globalSyms["_nmi"]
+	if !hasNMI {
+		nmiSym, hasNMI = l.globalSyms["nmi"]
+	}
+	if !hasNMI {
+		if stubSym, ok := l.globalSyms["__mrt0_stub_rts"]; ok {
+			l.globalSyms["_nmi"] = stubSym
+			l.globalSyms["nmi"] = stubSym
+		}
+	} else {
+		if _, ok := l.globalSyms["_nmi"]; !ok {
+			l.globalSyms["_nmi"] = nmiSym
+		}
+		if _, ok := l.globalSyms["nmi"]; !ok {
+			l.globalSyms["nmi"] = nmiSym
+		}
+	}
+
+	// Handle IRQ interrupt routine
+	irqSym, hasIRQ := l.globalSyms["_irq"]
+	if !hasIRQ {
+		irqSym, hasIRQ = l.globalSyms["irq"]
+	}
+	if !hasIRQ {
+		if stubSym, ok := l.globalSyms["__mrt0_stub_rts"]; ok {
+			l.globalSyms["_irq"] = stubSym
+			l.globalSyms["irq"] = stubSym
+		}
+	} else {
+		if _, ok := l.globalSyms["_irq"]; !ok {
+			l.globalSyms["_irq"] = irqSym
+		}
+		if _, ok := l.globalSyms["irq"]; !ok {
+			l.globalSyms["irq"] = irqSym
+		}
+	}
+
+	return nil
+}
+
+func (l *Linker) ensureRuntime() error {
+	for _, objFile := range l.objects {
+		for _, sym := range objFile.Symbols {
+			if sym.Type != obj.SymbolTypeImport && (sym.Name == "reset_handler" || sym.Name == "_reset_handler" || sym.Name == "reset" || sym.Name == "_reset") {
+				return nil
+			}
+		}
+	}
+
+	content, err := data.FS.ReadFile("lib/mrt0.s")
+	if err != nil {
+		return fmt.Errorf("linker error: failed to read embedded mrt0.s: %w", err)
+	}
+
+	mrt0Obj, err := asm.Assemble("mrt0.s", string(content))
+	if err != nil {
+		return fmt.Errorf("linker error: failed to assemble runtime mrt0.s: %w", err)
+	}
+
+	l.usingMrt0 = true
+	l.objects = append(l.objects, mrt0Obj)
 	return nil
 }
 
@@ -368,6 +456,16 @@ func (l *Linker) lookupSymbol(fileIdx int, name string) (*resolvedSymbol, bool) 
 	// Next check global/exported symbols
 	if sym, ok := l.globalSyms[name]; ok {
 		return sym, true
+	}
+	// Check fallback between _name and name
+	if strings.HasPrefix(name, "_") {
+		if sym, ok := l.globalSyms[strings.TrimPrefix(name, "_")]; ok {
+			return sym, true
+		}
+	} else {
+		if sym, ok := l.globalSyms["_"+name]; ok {
+			return sym, true
+		}
 	}
 	return nil, false
 }
@@ -446,7 +544,7 @@ func (l *Linker) setupVectors() error {
 	bank63 := l.banks[NumBanks-1]
 
 	// Find Reset Vector candidate
-	resetCandidates := []string{"reset_handler", "reset", "start", "main"}
+	resetCandidates := []string{"reset_handler", "_reset_handler", "reset", "start", "main", "_main"}
 	var resetSym *resolvedSymbol
 	for _, name := range resetCandidates {
 		if sym, ok := l.globalSyms[name]; ok {
@@ -456,7 +554,7 @@ func (l *Linker) setupVectors() error {
 	}
 
 	// Find NMI Vector candidate
-	nmiCandidates := []string{"nmi_handler", "nmi", "vblank_handler", "vblank"}
+	nmiCandidates := []string{"nmi_handler", "_nmi_handler", "nmi", "_nmi", "vblank_handler", "vblank"}
 	var nmiSym *resolvedSymbol
 	for _, name := range nmiCandidates {
 		if sym, ok := l.globalSyms[name]; ok {
@@ -466,7 +564,7 @@ func (l *Linker) setupVectors() error {
 	}
 
 	// Find IRQ Vector candidate
-	irqCandidates := []string{"irq_handler", "irq"}
+	irqCandidates := []string{"irq_handler", "_irq_handler", "irq", "_irq"}
 	var irqSym *resolvedSymbol
 	for _, name := range irqCandidates {
 		if sym, ok := l.globalSyms[name]; ok {

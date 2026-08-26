@@ -172,8 +172,22 @@ reset_handler:
 
 ### 4.2 Constant Definition and Assignment
 
-Symbols can be assigned constant values using `=` or `.set` / `.equ`:
+Symbols can be assigned constant assemble-time values using `.define` (or `.def`), `=`, or `.set` / `.equ`:
 
+#### `.define` / `.def`
+Defines an assemble-time constant value that can be used in place of numeric/address constants throughout the source file. Constant definitions can also be exported with `.export`:
+
+```assembly
+.define PPU_CTRL  $2000
+.define PPU_MASK  $2001
+.define MAX_LIVES 3
+.define BUFFER_SIZE (64 * 2)
+
+; Export constant definitions to other object files
+.export MAX_LIVES, BUFFER_SIZE
+```
+
+#### Direct Assignment and Reassignable Symbols
 ```assembly
 PPU_CTRL  = $2000
 PPU_MASK  = $2001

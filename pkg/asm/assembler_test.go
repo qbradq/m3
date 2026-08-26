@@ -444,3 +444,138 @@ loop:
 	}
 }
 
+func TestDefineDirective(t *testing.T) {
+	src := `
+    .export EXPORTED_VAL, EXPORTED_CALC
+    .define CONST_DEC 42
+    .define CONST_HEX $2000
+    .define CONST_BIN %10101010
+    .define CONST_CHAR 'Z'
+    .define CONST_EXPR (CONST_DEC * 2) + 5
+    .define CONST_WITH_EQ = $1234
+    .define CONST_WITH_COMMA, $5678
+    INFIX_CONST .define 99
+    .def DEF_ALIAS 100
+
+    .define EXPORTED_VAL $ABCD
+    .define EXPORTED_CALC EXPORTED_VAL + 1
+
+    .zp CONST_DEC
+
+    .bank 0
+main:
+    LDA #CONST_DEC           ; Immediate (A9 2A)
+    LDA #CONST_CHAR          ; Immediate (A9 5A)
+    LDA #<CONST_HEX          ; Low byte (A9 00)
+    LDA #>CONST_HEX          ; High byte (A9 20)
+    LDA #CONST_BIN           ; Immediate (A9 AA)
+    LDA CONST_DEC            ; Zero page (A5 2A)
+    LDA CONST_HEX            ; Absolute (AD 00 20)
+    LDX #CONST_EXPR          ; Immediate: 42*2 + 5 = 89 (A9 59)
+    LDY #INFIX_CONST         ; Immediate (A9 63)
+    LDA #DEF_ALIAS           ; Immediate (A9 64)
+
+data_block:
+    .byte CONST_DEC, CONST_CHAR, CONST_BIN
+    .word CONST_WITH_EQ, CONST_WITH_COMMA
+    .res INFIX_CONST - 97, $EE
+`
+	objFile, err := Assemble("test_define.s", src)
+	if err != nil {
+		t.Fatalf("assembly failed: %v", err)
+	}
+
+	symMap := make(map[string]obj.Symbol)
+	for _, s := range objFile.Symbols {
+		symMap[s.Name] = s
+	}
+
+	// Verify exported definitions in symbol table
+	if s, ok := symMap["EXPORTED_VAL"]; !ok {
+		t.Errorf("EXPORTED_VAL not found in symbols")
+	} else {
+		if s.Scope != obj.ScopeExport {
+			t.Errorf("expected EXPORTED_VAL scope EXPORT, got %v", s.Scope)
+		}
+		if s.Type != obj.SymbolTypeConst {
+			t.Errorf("expected EXPORTED_VAL type CONST, got %v", s.Type)
+		}
+		if s.Bank != obj.BankConst {
+			t.Errorf("expected EXPORTED_VAL bank %d, got %d", obj.BankConst, s.Bank)
+		}
+		if s.Value != 0xABCD {
+			t.Errorf("expected EXPORTED_VAL value 0xABCD, got 0x%X", s.Value)
+		}
+	}
+
+	if s, ok := symMap["EXPORTED_CALC"]; !ok {
+		t.Errorf("EXPORTED_CALC not found in symbols")
+	} else {
+		if s.Scope != obj.ScopeExport {
+			t.Errorf("expected EXPORTED_CALC scope EXPORT, got %v", s.Scope)
+		}
+		if s.Type != obj.SymbolTypeConst {
+			t.Errorf("expected EXPORTED_CALC type CONST, got %v", s.Type)
+		}
+		if s.Value != 0xABCE {
+			t.Errorf("expected EXPORTED_CALC value 0xABCE, got 0x%X", s.Value)
+		}
+	}
+
+	// Verify constant symbols defined internally
+	if s, ok := symMap["CONST_DEC"]; !ok || s.Value != 42 || s.Type != obj.SymbolTypeConst {
+		t.Errorf("CONST_DEC symbol invalid: %+v", s)
+	}
+	if s, ok := symMap["CONST_EXPR"]; !ok || s.Value != 89 || s.Type != obj.SymbolTypeConst {
+		t.Errorf("CONST_EXPR symbol invalid: %+v", s)
+	}
+	if s, ok := symMap["INFIX_CONST"]; !ok || s.Value != 99 || s.Type != obj.SymbolTypeConst {
+		t.Errorf("INFIX_CONST symbol invalid: %+v", s)
+	}
+	if s, ok := symMap["DEF_ALIAS"]; !ok || s.Value != 100 || s.Type != obj.SymbolTypeConst {
+		t.Errorf("DEF_ALIAS symbol invalid: %+v", s)
+	}
+
+	// Verify emitted bank 0 bytes
+	if len(objFile.Banks) != 1 {
+		t.Fatalf("expected 1 bank chunk, got %d", len(objFile.Banks))
+	}
+	bank0 := objFile.Banks[0]
+
+	expectedInstructions := []byte{
+		0xA9, 42,         // LDA #CONST_DEC
+		0xA9, 'Z',        // LDA #CONST_CHAR ('Z' = 0x5A)
+		0xA9, 0x00,       // LDA #<CONST_HEX
+		0xA9, 0x20,       // LDA #>CONST_HEX
+		0xA9, 0xAA,       // LDA #CONST_BIN (%10101010 = 0xAA)
+		0xA5, 42,         // LDA CONST_DEC (ZeroPage)
+		0xAD, 0x00, 0x20, // LDA CONST_HEX (Absolute $2000)
+		0xA2, 89,         // LDX #CONST_EXPR (42*2 + 5 = 89)
+		0xA0, 99,         // LDY #INFIX_CONST (99)
+		0xA9, 100,        // LDA #DEF_ALIAS (100)
+	}
+
+	expectedData := []byte{
+		42, 'Z', 0xAA, // .byte CONST_DEC, CONST_CHAR, CONST_BIN
+		0x34, 0x12, // .word CONST_WITH_EQ ($1234)
+		0x78, 0x56, // .word CONST_WITH_COMMA ($5678)
+		0xEE, 0xEE, // .res 99-97 (2 bytes) filled with $EE
+	}
+
+	expectedAll := append(expectedInstructions, expectedData...)
+	if !bytes.Equal(bank0.Data, expectedAll) {
+		t.Errorf("bank 0 byte mismatch:\ngot  % X\nwant % X", bank0.Data, expectedAll)
+	}
+}
+
+func TestDefineErrorOnUndefined(t *testing.T) {
+	src := `
+.define BAD_CONST UNDEFINED_SYM + 1
+LDA #BAD_CONST
+`
+	_, err := Assemble("err.s", src)
+	if err == nil {
+		t.Errorf("expected error on undefined symbol in .define, got nil")
+	}
+}
+

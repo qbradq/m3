@@ -113,6 +113,15 @@ func (p *Parser) ParseSourceFile() (*SourceFile, error) {
 				file.Decls = append(file.Decls, d)
 			}
 
+		case TokenDefine:
+			decls, err := p.parseDefineDecl()
+			if err != nil {
+				return nil, err
+			}
+			for _, d := range decls {
+				file.Decls = append(file.Decls, d)
+			}
+
 		case TokenTypeKw:
 			decl, err := p.parseTypeDecl()
 			if err != nil {
@@ -353,6 +362,67 @@ func (p *Parser) parseSingleConstDecl() (*ConstDecl, error) {
 		Bank:   bankSpec,
 		Value:  valueExpr,
 		pos:    pos,
+	}, nil
+}
+
+// ----------------------------------------------------------------------------
+// Define Declarations
+// ----------------------------------------------------------------------------
+
+func (p *Parser) parseDefineDecl() ([]*DefineDecl, error) {
+	p.nextToken() // consume 'define'
+
+	var decls []*DefineDecl
+
+	if p.curTokenIs(TokenLParen) {
+		// Grouped define declaration: define ( ... )
+		p.nextToken() // consume '('
+		p.skipSemicolons()
+		for !p.curTokenIs(TokenRParen) && !p.curTokenIs(TokenEOF) {
+			d, err := p.parseSingleDefineDecl()
+			if err != nil {
+				return nil, err
+			}
+			decls = append(decls, d)
+			p.skipSemicolons()
+		}
+		if !p.expect(TokenRParen) {
+			return nil, p.errorResult()
+		}
+	} else {
+		d, err := p.parseSingleDefineDecl()
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, d)
+	}
+
+	return decls, nil
+}
+
+func (p *Parser) parseSingleDefineDecl() (*DefineDecl, error) {
+	pos := p.curToken.Pos
+	if !p.curTokenIs(TokenIdent) {
+		p.errorf("expected identifier after define, got %s (%q)", p.curToken.Type, p.curToken.Literal)
+		return nil, p.errorResult()
+	}
+	name := p.curToken.Literal
+	p.nextToken()
+
+	// Optional '='
+	if p.curTokenIs(TokenEq) {
+		p.nextToken()
+	}
+
+	valExpr, err := p.parseExpression(0)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DefineDecl{
+		Name:  name,
+		Value: valExpr,
+		pos:   pos,
 	}, nil
 }
 
@@ -672,6 +742,20 @@ func (p *Parser) parseStatement() (Stmt, error) {
 		var stmts []Stmt
 		for _, d := range decls {
 			stmts = append(stmts, &ConstDeclStmt{Decl: d, pos: d.Pos()})
+		}
+		return &BlockStmt{Stmts: stmts, pos: pos}, nil
+
+	case TokenDefine:
+		decls, err := p.parseDefineDecl()
+		if err != nil {
+			return nil, err
+		}
+		if len(decls) == 1 {
+			return &DefineDeclStmt{Decl: decls[0], pos: pos}, nil
+		}
+		var stmts []Stmt
+		for _, d := range decls {
+			stmts = append(stmts, &DefineDeclStmt{Decl: d, pos: d.Pos()})
 		}
 		return &BlockStmt{Stmts: stmts, pos: pos}, nil
 

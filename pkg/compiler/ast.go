@@ -170,6 +170,17 @@ func (c *ConstDecl) Pos() Position { return c.pos }
 func (c *ConstDecl) declNode()     {}
 func (c *ConstDecl) stmtNode()     {}
 
+// DefineDecl represents a compile-time constant definition: define identifier const_expr
+type DefineDecl struct {
+	Name  string
+	Value Expr
+	pos   Position
+}
+
+func (d *DefineDecl) Pos() Position { return d.pos }
+func (d *DefineDecl) declNode()     {}
+func (d *DefineDecl) stmtNode()     {}
+
 // TypeDecl represents a type definition: type Actor struct { ... }
 type TypeDecl struct {
 	Name string
@@ -233,6 +244,15 @@ type ConstDeclStmt struct {
 
 func (c *ConstDeclStmt) Pos() Position { return c.pos }
 func (c *ConstDeclStmt) stmtNode()     {}
+
+// DefineDeclStmt wraps a DefineDecl as a statement inside functions.
+type DefineDeclStmt struct {
+	Decl *DefineDecl
+	pos  Position
+}
+
+func (d *DefineDeclStmt) Pos() Position { return d.pos }
+func (d *DefineDeclStmt) stmtNode()     {}
 
 // AssignStmt represents an assignment: Left op Right (=, +=, -=, etc.)
 type AssignStmt struct {

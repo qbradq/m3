@@ -1,10 +1,10 @@
 package main
 
 // Hardware Registers
-const (
-    PPU_CTRL uint16 = $2000
-    PPU_MASK uint16 = $2001
-    PPU_STAT uint16 = $2002
+define (
+    PPU_CTRL $2000
+    PPU_MASK $2001
+    PPU_STAT $2002
 )
 
 // Striped Struct Definition

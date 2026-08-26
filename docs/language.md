@@ -168,11 +168,50 @@ var (
 
 ---
 
-## 5. Constant & ROM Data Definitions (`const`)
+## 5. Compile-Time Definitions (`define`) & ROM Data (`const`)
+
+### 5.1 Compile-Time Definitions (`define`)
+
+The `define` statement creates compile-time constant values (numeric constants, hardware addresses, bitmasks, arithmetic expressions) that do not occupy PRG-ROM storage. Instead, they are emitted directly as assembler definitions (`.define`).
+
+#### Syntax
+```go
+// Single definition
+define identifier const_expr
+
+// Grouped definitions
+define (
+    identifier1 const_expr1
+    identifier2 const_expr2
+)
+```
+
+- **`const_expr`**: Any constant literal (integer, hex, binary, char), identifier, or constant arithmetic/bitwise expression. An optional `=` between identifier and expression is also accepted.
+- Definitions starting with an uppercase letter are exported to assembly as `.export` symbols.
+
+#### Examples
+```go
+// Hardware registers
+define PPU_CTRL $2000
+define PPU_MASK $2001
+define PPU_STAT $2002
+
+// Game constants and computed values
+define (
+    MAX_LIVES    3
+    SCREEN_WIDTH 256
+    HALF_WIDTH   (SCREEN_WIDTH / 2)
+    BG_PALETTE   $3F00
+)
+```
+
+---
+
+### 5.2 Constant & ROM Data Definitions (`const`)
 
 The `const` keyword defines immutable values or static data tables placed into **PRG-ROM**.
 
-### 5.1 Syntax
+#### Syntax
 
 ```go
 const identifier type[length] bank = value
@@ -182,19 +221,14 @@ const identifier type[length] bank = value
   - If length `[n]` is specified and value has fewer elements, the rest is padded with zeroes (`0`).
   - If length `[n]` is specified and value has more elements, it is truncated or triggers a compile error.
   - If length is omitted (or `[]`), length is automatically inferred from the value initializer.
-  - If length is `1` (or scalar), it is treated as a standard scalar constant.
+  - If length is `1` (or scalar), it is treated as a standard scalar constant placed in ROM.
 - **`bank` (optional)**:
   - `bank <n>`: Places the data into PRG-ROM bank `n` (`0` to `63`).
   - If bank is omitted, it defaults to **`bank auto`**, where the `m3` linker automatically packs the data into available PRG-ROM banks.
 
-### 5.2 Examples
+#### Examples
 
 ```go
-// Scalar compile-time constants (inlined or placed in ROM)
-const MAX_LIVES uint8 = 3
-const SCREEN_WIDTH uint8 = 256
-const PPU_CTRL_ADDR uint16 = $2000
-
 // Inferred length table placed with link-time auto banking
 const sine_table uint8[] = [32]uint8{
     0, 24, 49, 73, 96, 117, 136, 153, 

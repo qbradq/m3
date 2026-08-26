@@ -54,6 +54,7 @@ const (
 	TokenDotIncpal  // .incpal
 	TokenDotSet     // .set
 	TokenDotEqu     // .equ
+	TokenDotDefine  // .define, .def
 
 	// Delimiters & Punctuations
 	TokenColon     // :

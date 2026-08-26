@@ -26,6 +26,16 @@ type AssignmentStmt struct {
 
 func (a *AssignmentStmt) Pos() Position { return a.pos }
 
+// DefineDirective: .define <name> <expr>
+type DefineDirective struct {
+	Name     string
+	Value    Expr
+	IsExport bool
+	pos      Position
+}
+
+func (d *DefineDirective) Pos() Position { return d.pos }
+
 // InstructionStmt represents a 6502 machine instruction
 type InstructionStmt struct {
 	Mnemonic string

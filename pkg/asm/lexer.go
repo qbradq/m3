@@ -545,6 +545,8 @@ func lookupDirective(name string) TokenType {
 		return TokenDotSet
 	case ".equ":
 		return TokenDotEqu
+	case ".define", ".def":
+		return TokenDotDefine
 	default:
 		return TokenIdent
 	}

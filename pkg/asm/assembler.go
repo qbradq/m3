@@ -222,21 +222,90 @@ func (a *Assembler) pass1() error {
 				scopePrefix = ""
 			} else {
 				scopePrefix = s.Name
+				if s.IsProc && s.Name != "" {
+					var currentOffset uint32
+					var currentBank int32
+					switch a.currentSegment {
+					case SegmentPRG:
+						currentOffset = bankOffsets[a.currentBank]
+						if a.currentBank == obj.BankAutoIndex {
+							currentBank = obj.BankAuto
+						} else {
+							currentBank = int32(a.currentBank)
+						}
+					case SegmentZP:
+						currentOffset = a.zpOffset
+						currentBank = obj.BankZP
+					case SegmentRAM:
+						currentOffset = a.ramOffset
+						currentBank = obj.BankRAM
+					case SegmentWRAM:
+						currentOffset = a.wramOffset
+						currentBank = obj.BankWRAM
+					}
+					currentGlobalLabel = s.Name
+					a.symbols[s.Name] = symbolEntry{
+						name:  s.Name,
+						sTyp:  obj.SymbolTypeLabel,
+						scope: obj.ScopeGlobal,
+						bank:  currentBank,
+						val:   int64(currentOffset),
+					}
+				}
 			}
 
 		case *AssignmentStmt:
 			val, err := s.Value.Eval(a)
-			if err != nil {
-				// We can try to evaluate assignments during pass 1 if dependencies are already defined
-				// or store for later resolution
-			} else {
-				a.symbols[s.Name] = symbolEntry{
-					name:  s.Name,
+			fullName := s.Name
+			if scopePrefix != "" && !strings.Contains(s.Name, "::") {
+				fullName = scopePrefix + "::" + s.Name
+			}
+			if err == nil {
+				a.symbols[fullName] = symbolEntry{
+					name:  fullName,
 					sTyp:  obj.SymbolTypeConst,
 					scope: obj.ScopeLocal,
 					bank:  obj.BankConst,
 					val:   val,
 				}
+				if fullName != s.Name {
+					a.symbols[s.Name] = symbolEntry{
+						name:  s.Name,
+						sTyp:  obj.SymbolTypeConst,
+						scope: obj.ScopeLocal,
+						bank:  obj.BankConst,
+						val:   val,
+					}
+				}
+			}
+
+		case *DefineDirective:
+			val, err := s.Value.Eval(a)
+			fullName := s.Name
+			if scopePrefix != "" && !strings.Contains(s.Name, "::") {
+				fullName = scopePrefix + "::" + s.Name
+			}
+			if err == nil {
+				a.symbols[fullName] = symbolEntry{
+					name:  fullName,
+					sTyp:  obj.SymbolTypeConst,
+					scope: obj.ScopeLocal,
+					bank:  obj.BankConst,
+					val:   val,
+				}
+				if fullName != s.Name {
+					a.symbols[s.Name] = symbolEntry{
+						name:  s.Name,
+						sTyp:  obj.SymbolTypeConst,
+						scope: obj.ScopeLocal,
+						bank:  obj.BankConst,
+						val:   val,
+					}
+				}
+			}
+			if s.IsExport {
+				a.exports[s.Name] = true
+				a.exports[fullName] = true
 			}
 
 		case *LabelStmt:
@@ -521,6 +590,9 @@ func (a *Assembler) pass2() error {
 				scopePrefix = ""
 			} else {
 				scopePrefix = s.Name
+				if s.IsProc && s.Name != "" {
+					currentGlobalLabel = s.Name
+				}
 			}
 
 		case *LabelStmt:
@@ -534,14 +606,57 @@ func (a *Assembler) pass2() error {
 
 		case *AssignmentStmt:
 			val, err := s.Value.Eval(a)
+			fullName := s.Name
+			if scopePrefix != "" && !strings.Contains(s.Name, "::") {
+				fullName = scopePrefix + "::" + s.Name
+			}
 			if err == nil {
+				a.symbols[fullName] = symbolEntry{
+					name:  fullName,
+					sTyp:  obj.SymbolTypeConst,
+					scope: obj.ScopeLocal,
+					bank:  obj.BankConst,
+					val:   val,
+				}
+				if fullName != s.Name {
+					a.symbols[s.Name] = symbolEntry{
+						name:  s.Name,
+						sTyp:  obj.SymbolTypeConst,
+						scope: obj.ScopeLocal,
+						bank:  obj.BankConst,
+						val:   val,
+					}
+				}
+			}
+
+		case *DefineDirective:
+			val, err := s.Value.Eval(a)
+			if err != nil {
+				return fmt.Errorf("%s: cannot evaluate constant expression for .define %q: %w", s.Pos(), s.Name, err)
+			}
+			fullName := s.Name
+			if scopePrefix != "" && !strings.Contains(s.Name, "::") {
+				fullName = scopePrefix + "::" + s.Name
+			}
+			a.symbols[fullName] = symbolEntry{
+				name:  fullName,
+				sTyp:  obj.SymbolTypeConst,
+				scope: obj.ScopeLocal,
+				bank:  obj.BankConst,
+				val:   val,
+			}
+			if fullName != s.Name {
 				a.symbols[s.Name] = symbolEntry{
 					name:  s.Name,
 					sTyp:  obj.SymbolTypeConst,
 					scope: obj.ScopeLocal,
-					bank:  -1,
+					bank:  obj.BankConst,
 					val:   val,
 				}
+			}
+			if s.IsExport {
+				a.exports[s.Name] = true
+				a.exports[fullName] = true
 			}
 
 		case *InstructionStmt:

@@ -126,8 +126,8 @@ func (p *Parser) parseLine() ([]Statement, error) {
 		if p.curTokenIs(TokenEOL) || p.curTokenIs(TokenEOF) {
 			return stmts, nil
 		}
-	} else if p.curTokenIs(TokenIdent) && (p.peekTokenIs(TokenColon) || (!cpu6502.IsMnemonic(p.curTok.Literal) && (p.peekTokenIs(TokenAssign) || p.peekTokenIs(TokenDotSet) || p.peekTokenIs(TokenDotEqu)))) {
-		// 3. Global Label 'ident:' or Assignment 'ident = expr'
+	} else if p.curTokenIs(TokenIdent) && (p.peekTokenIs(TokenColon) || (!cpu6502.IsMnemonic(p.curTok.Literal) && (p.peekTokenIs(TokenAssign) || p.peekTokenIs(TokenDotSet) || p.peekTokenIs(TokenDotEqu) || p.peekTokenIs(TokenDotDefine)))) {
+		// 3. Global Label 'ident:' or Assignment 'ident = expr' or 'ident .define expr'
 		pos := p.curTok.Pos
 		ident := p.curTok.Literal
 		if err := p.nextToken(); err != nil {
@@ -145,6 +145,25 @@ func (p *Parser) parseLine() ([]Statement, error) {
 			if p.curTokenIs(TokenEOL) || p.curTokenIs(TokenEOF) {
 				return stmts, nil
 			}
+		} else if p.curTokenIs(TokenDotDefine) {
+			if err := p.nextToken(); err != nil {
+				return nil, err
+			}
+			if p.curTokenIs(TokenAssign) || p.curTokenIs(TokenComma) {
+				if err := p.nextToken(); err != nil {
+					return nil, err
+				}
+			}
+			expr, err := p.parseExpression()
+			if err != nil {
+				return nil, err
+			}
+			stmts = append(stmts, &DefineDirective{
+				Name:  ident,
+				Value: expr,
+				pos:   pos,
+			})
+			return stmts, nil
 		} else if p.curTokenIs(TokenAssign) || p.curTokenIs(TokenDotSet) || p.curTokenIs(TokenDotEqu) {
 			isSet := p.curTokenIs(TokenDotSet)
 			if err := p.nextToken(); err != nil {
@@ -183,6 +202,8 @@ func (p *Parser) parseLine() ([]Statement, error) {
 func (p *Parser) parseOperationOrDirective() (Statement, error) {
 	// Directives
 	switch p.curTok.Type {
+	case TokenDotDefine:
+		return p.parseDefineDirective()
 	case TokenDotBank:
 		return p.parseBankDirective()
 	case TokenDotZP:
@@ -223,6 +244,30 @@ func (p *Parser) parseOperationOrDirective() (Statement, error) {
 	}
 
 	return nil, fmt.Errorf("%s: unrecognized statement or syntax '%s'", p.curTok.Pos, p.curTok.Literal)
+}
+
+func (p *Parser) parseDefineDirective() (Statement, error) {
+	pos := p.curTok.Pos
+	if err := p.nextToken(); err != nil {
+		return nil, err
+	}
+	if !p.curTokenIs(TokenIdent) {
+		return nil, fmt.Errorf("%s: expected identifier after .define", p.curTok.Pos)
+	}
+	name := p.curTok.Literal
+	if err := p.nextToken(); err != nil {
+		return nil, err
+	}
+	if p.curTokenIs(TokenAssign) || p.curTokenIs(TokenComma) {
+		if err := p.nextToken(); err != nil {
+			return nil, err
+		}
+	}
+	expr, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &DefineDirective{Name: name, Value: expr, pos: pos}, nil
 }
 
 func (p *Parser) parseBankDirective() (Statement, error) {

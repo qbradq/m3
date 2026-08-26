@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/qbradq/m3/pkg/asm"
+	"github.com/qbradq/m3/pkg/compiler"
 )
 
 func TestLinkSingleObject(t *testing.T) {
@@ -606,4 +607,217 @@ reset_handler:
 		t.Errorf("expected exceeds bank limit error message, got: %v", err)
 	}
 }
+
+func TestLinkExportedDefine(t *testing.T) {
+	srcA := `
+    .export MAX_HP, PALETTE_BASE
+    .define MAX_HP 100
+    .define PALETTE_BASE $3F00
+`
+	srcB := `
+    .export reset_handler
+    .import MAX_HP, PALETTE_BASE
+
+.bank 0
+data_block:
+    .byte MAX_HP
+    .word PALETTE_BASE
+
+.bank 63
+reset_handler:
+    LDA #MAX_HP
+    LDX #<PALETTE_BASE
+    LDY #>PALETTE_BASE
+    RTS
+`
+	objA, err := asm.Assemble("constants.s", srcA)
+	if err != nil {
+		t.Fatalf("failed to assemble constants.s: %v", err)
+	}
+	objB, err := asm.Assemble("game.s", srcB)
+	if err != nil {
+		t.Fatalf("failed to assemble game.s: %v", err)
+	}
+
+	l := NewLinker(objA, objB)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link: %v", err)
+	}
+
+	// Verify bank 0 data: MAX_HP (100 = 0x64), PALETTE_BASE ($3F00 -> 00, 3F)
+	bank0Offset := INESHeaderSize + 0*BankSize
+	if rom[bank0Offset] != 100 {
+		t.Errorf("expected byte 100, got %d", rom[bank0Offset])
+	}
+	if rom[bank0Offset+1] != 0x00 || rom[bank0Offset+2] != 0x3F {
+		t.Errorf("expected word $3F00, got 0x%02X 0x%02X", rom[bank0Offset+1], rom[bank0Offset+2])
+	}
+
+	// Verify bank 63 reset_handler:
+	// LDA #100       -> A9 64
+	// LDX #<$3F00    -> A2 00
+	// LDY #>$3F00    -> A0 3F
+	// RTS            -> 60
+	bank63Offset := INESHeaderSize + 63*BankSize
+	expected := []byte{0xA9, 100, 0xA2, 0x00, 0xA0, 0x3F, 0x60}
+	for i, exp := range expected {
+		if rom[bank63Offset+i] != exp {
+			t.Errorf("byte %d in bank 63 mismatch: got 0x%02X, want 0x%02X", i, rom[bank63Offset+i], exp)
+		}
+	}
+}
+
+func TestLinkMRT0DefaultStubbing(t *testing.T) {
+	// Program defining only _main, without nmi or irq
+	src := `
+.bank 0
+.proc _main
+    LDA #$42
+    RTS
+.endproc
+`
+	objFile, err := asm.Assemble("game.s", src)
+	if err != nil {
+		t.Fatalf("failed to assemble: %v", err)
+	}
+
+	l := NewLinker(objFile)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link with mrt0: %v", err)
+	}
+
+	if len(rom) != TotalOutputSize {
+		t.Fatalf("expected ROM size %d, got %d", TotalOutputSize, len(rom))
+	}
+
+	// Verify Bank 63 vectors
+	bank63Offset := INESHeaderSize + 63*BankSize
+	nmiAddr := binary.LittleEndian.Uint16(rom[bank63Offset+NMIVectorOffset : bank63Offset+NMIVectorOffset+2])
+	resetAddr := binary.LittleEndian.Uint16(rom[bank63Offset+ResetVectorOffset : bank63Offset+ResetVectorOffset+2])
+	irqAddr := binary.LittleEndian.Uint16(rom[bank63Offset+IRQVectorOffset : bank63Offset+IRQVectorOffset+2])
+
+	// Vectors should point inside Bank 63 ($E000 - $FFFF)
+	if resetAddr < 0xE000 {
+		t.Errorf("reset vector $%04X is not in Bank 63", resetAddr)
+	}
+	if nmiAddr < 0xE000 {
+		t.Errorf("nmi vector $%04X is not in Bank 63", nmiAddr)
+	}
+	if irqAddr < 0xE000 {
+		t.Errorf("irq vector $%04X is not in Bank 63", irqAddr)
+	}
+
+	// Verify Bank 0 contains _main at $8000 (A9 42, 60)
+	bank0Offset := INESHeaderSize
+	if rom[bank0Offset] != 0xA9 || rom[bank0Offset+1] != 0x42 || rom[bank0Offset+2] != 0x60 {
+		t.Errorf("expected _main at $8000 (A9 42 60), got %02X %02X %02X",
+			rom[bank0Offset], rom[bank0Offset+1], rom[bank0Offset+2])
+	}
+}
+
+func TestLinkMRT0CustomNMIAndIRQ(t *testing.T) {
+	// Program defining _main, _nmi, and _irq
+	src := `
+.bank 0
+.proc _main
+    RTS
+.endproc
+
+.proc _nmi
+    INC $00
+    RTS
+.endproc
+
+.proc _irq
+    INC $01
+    RTS
+.endproc
+`
+	objFile, err := asm.Assemble("handlers.s", src)
+	if err != nil {
+		t.Fatalf("failed to assemble: %v", err)
+	}
+
+	l := NewLinker(objFile)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link: %v", err)
+	}
+
+	if len(rom) != TotalOutputSize {
+		t.Fatalf("expected ROM size %d, got %d", TotalOutputSize, len(rom))
+	}
+}
+
+func TestLinkMRT0MissingMainError(t *testing.T) {
+	// Object without _main or main
+	src := `
+.bank 0
+.proc _some_func
+    RTS
+.endproc
+`
+	objFile, err := asm.Assemble("nomain.s", src)
+	if err != nil {
+		t.Fatalf("failed to assemble: %v", err)
+	}
+
+	l := NewLinker(objFile)
+	_, err = l.Link()
+	if err == nil {
+		t.Fatal("expected linker error due to missing main, got nil")
+	}
+	if !strings.Contains(err.Error(), "undefined symbol \"main\"") {
+		t.Errorf("expected undefined symbol main error, got: %v", err)
+	}
+}
+
+func TestLinkEndToEndM3Program(t *testing.T) {
+	m3Src := `
+package main
+
+define (
+    PPU_CTRL $2000
+)
+
+var (
+    frame_count uint16 zp
+)
+
+func nmi() {
+    frame_count++
+}
+
+func main() bank 0 {
+    for {
+        asm {
+        :   BIT $2002
+            BPL :-
+        }
+    }
+}
+`
+	_, asmCode, err := compiler.Compile("test.m3", m3Src)
+	if err != nil {
+		t.Fatalf("failed to compile m3 source: %v", err)
+	}
+
+	objFile, err := asm.Assemble("test.s", asmCode)
+	if err != nil {
+		t.Fatalf("failed to assemble generated asm:\n%s\nerror: %v", asmCode, err)
+	}
+
+	l := NewLinker(objFile)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link: %v", err)
+	}
+
+	if len(rom) != TotalOutputSize {
+		t.Fatalf("expected ROM size %d, got %d", TotalOutputSize, len(rom))
+	}
+}
+
 

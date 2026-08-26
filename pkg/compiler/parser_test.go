@@ -299,3 +299,61 @@ func TestParseUnaryAndBuiltins(t *testing.T) {
 		t.Fatalf("expected 8 statements, got %d", len(fn.Body.Stmts))
 	}
 }
+
+func TestParseDefineDecl(t *testing.T) {
+	src := `
+	package main
+
+	define PPU_CTRL $2000
+	define PPU_MASK = $2001
+	define (
+		PPU_STAT $2002
+		MAX_LIVES 3
+		SCREEN_WIDTH (128 * 2)
+	)
+
+	func foo() {
+		define LOCAL_DEF 42
+	}
+	`
+	lexer := NewLexer("define.m3", src)
+	parser := NewParser(lexer)
+	file, err := parser.ParseSourceFile()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	// 5 top-level defines + 1 func
+	if len(file.Decls) != 6 {
+		t.Fatalf("expected 6 top-level decls, got %d", len(file.Decls))
+	}
+
+	d0, ok := file.Decls[0].(*DefineDecl)
+	if !ok || d0.Name != "PPU_CTRL" {
+		t.Errorf("expected define PPU_CTRL, got %+v", file.Decls[0])
+	}
+	d1, ok := file.Decls[1].(*DefineDecl)
+	if !ok || d1.Name != "PPU_MASK" {
+		t.Errorf("expected define PPU_MASK, got %+v", file.Decls[1])
+	}
+	d2, ok := file.Decls[2].(*DefineDecl)
+	if !ok || d2.Name != "PPU_STAT" {
+		t.Errorf("expected define PPU_STAT, got %+v", file.Decls[2])
+	}
+	d3, ok := file.Decls[3].(*DefineDecl)
+	if !ok || d3.Name != "MAX_LIVES" {
+		t.Errorf("expected define MAX_LIVES, got %+v", file.Decls[3])
+	}
+	d4, ok := file.Decls[4].(*DefineDecl)
+	if !ok || d4.Name != "SCREEN_WIDTH" {
+		t.Errorf("expected define SCREEN_WIDTH, got %+v", file.Decls[4])
+	}
+
+	fn := file.Decls[5].(*FuncDecl)
+	if len(fn.Body.Stmts) != 1 {
+		t.Fatalf("expected 1 statement in foo(), got %d", len(fn.Body.Stmts))
+	}
+	if _, ok := fn.Body.Stmts[0].(*DefineDeclStmt); !ok {
+		t.Errorf("expected DefineDeclStmt in foo(), got %T", fn.Body.Stmts[0])
+	}
+}

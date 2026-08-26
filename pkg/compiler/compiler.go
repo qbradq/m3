@@ -67,6 +67,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 	var zpVars []*VarDecl
 	var ramVars []*VarDecl
 	var wramVars []*VarDecl
+	var defineDecls []*DefineDecl
 	var constDecls []*ConstDecl
 	var funcDecls []*FuncDecl
 
@@ -81,10 +82,24 @@ func generateAssembly(file *SourceFile) (string, error) {
 			default:
 				ramVars = append(ramVars, d)
 			}
+		case *DefineDecl:
+			defineDecls = append(defineDecls, d)
 		case *ConstDecl:
 			constDecls = append(constDecls, d)
 		case *FuncDecl:
 			funcDecls = append(funcDecls, d)
+		}
+	}
+
+	// Compile-time Definitions (.define)
+	if len(defineDecls) > 0 {
+		sb.WriteString("; Compile-time Definitions\n")
+		for _, d := range defineDecls {
+			name := mangleSymbol(d.Name)
+			if isExported(d.Name) {
+				sb.WriteString(fmt.Sprintf(".export %s\n", name))
+			}
+			sb.WriteString(fmt.Sprintf(".define %s %s\n\n", name, formatConstExpr(d.Value)))
 		}
 	}
 
@@ -239,4 +254,67 @@ func isExported(name string) bool {
 	}
 	first := name[0]
 	return first >= 'A' && first <= 'Z'
+}
+
+func formatConstExpr(expr Expr) string {
+	if expr == nil {
+		return "0"
+	}
+	switch e := expr.(type) {
+	case *NumberLit:
+		if e.Raw != "" {
+			if strings.HasPrefix(e.Raw, "0x") || strings.HasPrefix(e.Raw, "0X") {
+				return "$" + e.Raw[2:]
+			}
+			if strings.HasPrefix(e.Raw, "0b") || strings.HasPrefix(e.Raw, "0B") {
+				return "%" + e.Raw[2:]
+			}
+			return e.Raw
+		}
+		return fmt.Sprintf("%d", e.Value)
+	case *CharLit:
+		return fmt.Sprintf("'%c'", e.Value)
+	case *BoolLit:
+		if e.Value {
+			return "1"
+		}
+		return "0"
+	case *StringLit:
+		return fmt.Sprintf("%q", e.Value)
+	case *Ident:
+		return mangleSymbol(e.Name)
+	case *ParenExpr:
+		return fmt.Sprintf("(%s)", formatConstExpr(e.Expr))
+	case *UnaryExpr:
+		opStr := e.Op.String()
+		switch e.Op {
+		case TokenTilde, TokenCaret:
+			opStr = "~"
+		case TokenBang:
+			opStr = "!"
+		case TokenLt:
+			opStr = "<"
+		case TokenGt:
+			opStr = ">"
+		case TokenAmp:
+			opStr = "^"
+		}
+		return opStr + formatConstExpr(e.Operand)
+	case *BinaryExpr:
+		opStr := e.Op.String()
+		switch e.Op {
+		case TokenEqEq:
+			opStr = "=="
+		case TokenBangEq:
+			opStr = "!="
+		}
+		return fmt.Sprintf("%s %s %s", formatConstExpr(e.Left), opStr, formatConstExpr(e.Right))
+	case *CallExpr:
+		if len(e.Args) == 1 {
+			return formatConstExpr(e.Args[0])
+		}
+		return "0"
+	default:
+		return "0"
+	}
 }
