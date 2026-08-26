@@ -39,3 +39,9 @@ PROMPT.md
 m3
 *.mo
 *.nes
+
+# Node / VSCode extension
+node_modules/
+dist/
+*.vsix
+

@@ -1,0 +1,198 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "m3 Assembly",
+  "scopeName": "source.m3asm",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#characters" },
+    { "include": "#numbers" },
+    { "include": "#directives" },
+    { "include": "#mnemonics" },
+    { "include": "#labels" },
+    { "include": "#registers" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.semicolon.m3asm",
+          "match": ";.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.m3asm",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.m3asm",
+              "match": "\\\\(?:[nrt0\\\\'\"]|x[0-9a-fA-F]{2})"
+            }
+          ]
+        }
+      ]
+    },
+    "characters": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.m3asm",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.m3asm",
+              "match": "\\\\(?:[nrt0\\\\'\"]|x[0-9a-fA-F]{2})"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.m3asm",
+          "match": "\\$[0-9a-fA-F]+\\b|\\b0x[0-9a-fA-F]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.m3asm",
+          "match": "%[01]+\\b|\\b0b[01]+\\b"
+        },
+        {
+          "name": "constant.numeric.decimal.m3asm",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "directives": {
+      "patterns": [
+        {
+          "name": "keyword.control.directive.bank.m3asm",
+          "match": "\\.(bank)\\b"
+        },
+        {
+          "name": "storage.type.directive.memory.m3asm",
+          "match": "\\.(zp|zeropage|ram|bss|wram|prgram|sram)\\b"
+        },
+        {
+          "name": "keyword.other.directive.data.m3asm",
+          "match": "\\.(byte|byt|db|word|addr|dw|dword|dd|asciiz|stringz)\\b"
+        },
+        {
+          "name": "keyword.other.directive.reserve.m3asm",
+          "match": "\\.(res|reserve)\\b"
+        },
+        {
+          "name": "keyword.control.directive.linkage.m3asm",
+          "match": "\\.(export|global|import|importzp|proc|endproc|scope|endscope)\\b"
+        },
+        {
+          "name": "keyword.control.directive.conditional.m3asm",
+          "match": "\\.(if|elseif|else|endif|ifdef|ifndef)\\b"
+        },
+        {
+          "name": "keyword.control.directive.macro.m3asm",
+          "match": "\\.(macro|endmacro)\\b"
+        },
+        {
+          "name": "keyword.control.directive.include.m3asm",
+          "match": "\\.(include|incbin|incchr|incpal)\\b"
+        },
+        {
+          "name": "keyword.other.directive.define.m3asm",
+          "match": "\\.(define|def|set|equ)\\b"
+        },
+        {
+          "name": "constant.language.auto.m3asm",
+          "match": "\\bauto\\b"
+        }
+      ]
+    },
+    "mnemonics": {
+      "patterns": [
+        {
+          "name": "keyword.mnemonic.6502.m3asm",
+          "match": "(?i:\\b(ADC|AND|ASL|BCC|BCS|BEQ|BIT|BMI|BNE|BPL|BRK|BVC|BVS|CLC|CLD|CLI|CLV|CMP|CPX|CPY|DEC|DEX|DEY|EOR|INC|INX|INY|JMP|JSR|LDA|LDX|LDY|LSR|NOP|ORA|PHA|PHP|PLA|PLP|ROL|ROR|RTI|RTS|SBC|SEC|SED|SEI|STA|STX|STY|TAX|TAY|TSX|TXA|TXS|TYA)\\b)"
+        }
+      ]
+    },
+    "labels": {
+      "patterns": [
+        {
+          "name": "entity.name.label.anonymous.definition.m3asm",
+          "match": "^\\s*(:)(?=\\s|$)"
+        },
+        {
+          "name": "entity.name.label.anonymous.reference.m3asm",
+          "match": ":(?:\\+{1,3}|\\-{1,3})"
+        },
+        {
+          "match": "(@[a-zA-Z0-9_]+)\\s*(:)",
+          "captures": {
+            "1": { "name": "entity.name.label.local.m3asm" },
+            "2": { "name": "punctuation.separator.colon.m3asm" }
+          }
+        },
+        {
+          "name": "variable.other.label.local.m3asm",
+          "match": "@[a-zA-Z0-9_]+"
+        },
+        {
+          "match": "([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)\\s*(:)",
+          "captures": {
+            "1": { "name": "entity.name.label.global.m3asm" },
+            "2": { "name": "punctuation.separator.colon.m3asm" }
+          }
+        }
+      ]
+    },
+    "registers": {
+      "patterns": [
+        {
+          "name": "variable.language.register.m3asm",
+          "match": "(?<=[,\\s(])(?i:[AXY])(?=[,\\s)]|$)"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "storage.modifier.size.m3asm",
+          "match": "\\b[za]:"
+        },
+        {
+          "name": "keyword.operator.byte-selector.m3asm",
+          "match": "[<>^]"
+        },
+        {
+          "name": "keyword.operator.immediate.m3asm",
+          "match": "#"
+        },
+        {
+          "name": "keyword.operator.arithmetic.m3asm",
+          "match": "\\+|-|\\*|/|%"
+        },
+        {
+          "name": "keyword.operator.bitwise.m3asm",
+          "match": "<<|>>|&|\\||\\^|~"
+        },
+        {
+          "name": "keyword.operator.logical.m3asm",
+          "match": "&&|\\|\\||!"
+        },
+        {
+          "name": "keyword.operator.comparison.m3asm",
+          "match": "==|!=|<>|<=|>=|<|="
+        },
+        {
+          "name": "punctuation.separator.m3asm",
+          "match": "[,:]"
+        }
+      ]
+    }
+  }
+}

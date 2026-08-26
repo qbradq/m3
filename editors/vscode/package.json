@@ -1,0 +1,81 @@
+{
+  "name": "vscode-m3",
+  "displayName": "m3 Language & NES Assembler Support",
+  "description": "Language support and syntax highlighting for the m3 language and 6502 assembly dialect",
+  "version": "0.1.0",
+  "publisher": "m3-tools",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qbradq/m3"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./dist/client/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "m3",
+        "aliases": [
+          "m3",
+          "M3"
+        ],
+        "extensions": [
+          ".m3"
+        ],
+        "configuration": "./language-configuration-m3.json"
+      },
+      {
+        "id": "m3-asm",
+        "aliases": [
+          "m3 Assembly",
+          "m3asm",
+          "6502 Assembly (m3)"
+        ],
+        "extensions": [
+          ".s",
+          ".asm",
+          ".inc"
+        ],
+        "configuration": "./language-configuration-asm.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "m3",
+        "scopeName": "source.m3",
+        "path": "./syntaxes/m3.tmLanguage.json"
+      },
+      {
+        "language": "m3-asm",
+        "scopeName": "source.m3asm",
+        "path": "./syntaxes/m3asm.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc -b",
+    "watch": "tsc -b -w",
+    "build": "node esbuild.js",
+    "package": "vsce package",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.80.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.3",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.3.2"
+  }
+}
