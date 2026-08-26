@@ -66,6 +66,79 @@ func move_player(dx int8, dy int8) bank 0 {
   assert.deepStrictEqual(memberLabels, ['x', 'y', 'health'], 'Should suggest struct fields on dot access');
 }
 
+function testM3ImportedPackageCompletionAndHover() {
+  const m3Source = `
+package main
+
+import (
+    "oam.m3"
+    "ppu.m3"
+    "memory.m3"
+)
+
+func main() {
+    ppu.Disable()
+    oam.Clear()
+    memory.Copy(src, dst, 16)
+}
+`;
+
+  const doc = TextDocument.create('file:///test_imports.m3', 'm3', 1, m3Source);
+  const parsed = parseM3Document(m3Source, 'file:///test_imports.m3');
+
+  // Verify packages were loaded
+  assert.ok(parsed.importedPackages.has('ppu'), 'ppu package should be imported');
+  assert.ok(parsed.importedPackages.has('oam'), 'oam package should be imported');
+  assert.ok(parsed.importedPackages.has('memory'), 'memory package should be imported');
+
+  // Check ppu symbols
+  const ppuPkg = parsed.importedPackages.get('ppu')!;
+  assert.ok(ppuPkg.symbols.has('Disable'), 'ppu should contain Disable func');
+  assert.ok(ppuPkg.symbols.has('Enable'), 'ppu should contain Enable func');
+
+  // Test package member completion when typing "ppu."
+  const ppuDoc = TextDocument.create('file:///test_imports.m3', 'm3', 2, '    ppu.');
+  const ppuCompletions = getM3Completions(ppuDoc, { line: 0, character: 8 }, parsed);
+  const ppuLabels = ppuCompletions.map((c) => c.label);
+  assert.ok(ppuLabels.includes('Disable'), 'ppu. completion should include Disable');
+  assert.ok(ppuLabels.includes('Enable'), 'ppu. completion should include Enable');
+  assert.ok(ppuLabels.includes('DirectUploadPalette'), 'ppu. completion should include DirectUploadPalette');
+
+  // Test package member completion when typing "oam."
+  const oamDoc = TextDocument.create('file:///test_imports.m3', 'm3', 3, '    oam.');
+  const oamCompletions = getM3Completions(oamDoc, { line: 0, character: 8 }, parsed);
+  const oamLabels = oamCompletions.map((c) => c.label);
+  assert.ok(oamLabels.includes('Clear'), 'oam. completion should include Clear');
+  assert.ok(oamLabels.includes('PutSprite'), 'oam. completion should include PutSprite');
+
+  // Test package member completion when typing "memory."
+  const memDoc = TextDocument.create('file:///test_imports.m3', 'm3', 4, '    memory.');
+  const memCompletions = getM3Completions(memDoc, { line: 0, character: 11 }, parsed);
+  const memLabels = memCompletions.map((c) => c.label);
+  assert.ok(memLabels.includes('Copy'), 'memory. completion should include Copy');
+
+  // Test general completions includes "ppu", "ppu.Disable", "memory.Copy"
+  const generalCompletions = getM3Completions(doc, { line: 8, character: 0 }, parsed);
+  const generalLabels = generalCompletions.map((c) => c.label);
+  assert.ok(generalLabels.includes('ppu'), 'General completions should include ppu module');
+  assert.ok(generalLabels.includes('ppu.Disable'), 'General completions should include qualified ppu.Disable');
+  assert.ok(generalLabels.includes('memory.Copy'), 'General completions should include qualified memory.Copy');
+
+  // Test hover on "ppu.Disable"
+  const hoverDoc = TextDocument.create('file:///test_imports.m3', 'm3', 5, '    ppu.Disable()');
+  const hoverResult = getM3Hover(hoverDoc, { line: 0, character: 10 }, parsed);
+  assert.ok(hoverResult, 'Hover on ppu.Disable should return docs');
+  const hoverText = (hoverResult!.contents as MarkupContent).value;
+  assert.ok(hoverText.includes('ppu.Disable'));
+  assert.ok(hoverText.includes('Disable turns the screen'));
+
+  // Test hover on package name "ppu"
+  const pkgHover = getM3Hover(hoverDoc, { line: 0, character: 5 }, parsed);
+  assert.ok(pkgHover, 'Hover on package name ppu should return package info');
+  const pkgHoverText = (pkgHover!.contents as MarkupContent).value;
+  assert.ok(pkgHoverText.includes('package ppu'));
+}
+
 function testM3Hover() {
   const m3Source = `
 // System frame counter in ZP
@@ -209,6 +282,8 @@ function main() {
   console.log('Running Language Server Unit Tests...');
   testM3ParsingAndCompletion();
   console.log('✓ m3 Parsing & Symbol Completion Passed');
+  testM3ImportedPackageCompletionAndHover();
+  console.log('✓ m3 Imported Package Symbol Completion & Hover Passed');
   testM3Hover();
   console.log('✓ m3 Symbol Hover & Documentation Passed');
   testAsmParsingAndCompletion();

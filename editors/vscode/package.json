@@ -16,6 +16,10 @@
     "Programming Languages"
   ],
   "main": "./dist/client/extension.js",
+  "activationEvents": [
+    "onLanguage:m3",
+    "onLanguage:m3-asm"
+  ],
   "contributes": {
     "languages": [
       {
@@ -62,7 +66,7 @@
     "compile": "tsc -b",
     "watch": "tsc -b -w",
     "build": "node esbuild.js",
-    "package": "vsce package",
+    "package": "npx @vscode/vsce package",
     "check-types": "tsc --noEmit",
     "test": "tsc -b && node out/server/test/test_server.js"
   },

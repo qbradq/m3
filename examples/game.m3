@@ -2,6 +2,8 @@ package main
 
 import (
     "oam.m3"
+    "ppu.m3"
+    "memory.m3"
 
     "./data/data.m3"
 )
@@ -28,6 +30,7 @@ var (
     player_y      uint8    zp
     enemies       Enemy[8] ram
     high_score    uint32   wram
+    palette_buffer uint8[32] ram
 )
 
 // PRG-ROM Data Table (Auto placed by Linker)
@@ -56,10 +59,20 @@ func update_enemies() {
 }
 
 // Main Game Entry Point
-func main() bank 0 {
+func main() {
+    // Init variables
     player_x = 120
     player_y = 180
     init_enemies()
+
+    // Load RAM
+    memory.Copy(data.font_pal, &palette_buffer[0], 16)
+    memory.Copy(data.sprite_pal, &palette_buffer[16], 16)
+
+    // Initialize PPU
+    ppu.Disable() 
+    ppu.UploadPalette(palette_buffer)
+    ppu.Enable()
 
     for {
         // Wait for VBlank

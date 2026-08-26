@@ -34,13 +34,45 @@ export function getM3Completions(
     end: position,
   });
 
-  // Check for struct member access: e.g. "actor." or "actors[i]."
+  // 1. Check for package member access or struct member access: e.g. "ppu." or "actors[i]."
   const memberMatch = lineText.match(/([a-zA-Z_][a-zA-Z0-9_]*(?:\[[^\]]*\])?)\.([a-zA-Z0-9_]*)$/);
   if (memberMatch) {
     const rawTarget = memberMatch[1];
-    const varName = rawTarget.replace(/\[.*\]/, '').trim();
-    const varSym = parsedDoc.symbols.get(varName);
+    const prefix = rawTarget.replace(/\[.*\]/, '').trim();
 
+    // 1a. Is prefix an imported package? (e.g. ppu, oam, memory, data)
+    if (parsedDoc.importedPackages.has(prefix)) {
+      const pkg = parsedDoc.importedPackages.get(prefix)!;
+      const pkgItems: CompletionItem[] = [];
+
+      for (const sym of pkg.symbols.values()) {
+        let itemKind: CompletionItemKind = CompletionItemKind.Variable;
+        if (sym.kind === SymbolKind.Function) {
+          itemKind = CompletionItemKind.Function;
+        } else if (sym.kind === SymbolKind.Constant || sym.kind === SymbolKind.Define) {
+          itemKind = CompletionItemKind.Constant;
+        } else if (sym.kind === SymbolKind.Struct) {
+          itemKind = CompletionItemKind.Struct;
+        }
+
+        pkgItems.push({
+          label: sym.name,
+          kind: itemKind,
+          detail: `${prefix}.${sym.detail}`,
+          documentation: sym.docComment
+            ? {
+                kind: MarkupKind.Markdown,
+                value: sym.docComment,
+              }
+            : undefined,
+        });
+      }
+
+      return pkgItems;
+    }
+
+    // 1b. Is prefix a variable with a struct type?
+    const varSym = parsedDoc.symbols.get(prefix);
     if (varSym && varSym.type) {
       const baseType = getBaseTypeName(varSym.type);
       const structSym = baseType ? parsedDoc.structs.get(baseType) : undefined;
@@ -62,7 +94,7 @@ export function getM3Completions(
 
   const items: CompletionItem[] = [];
 
-  // 1. User-defined symbols in document
+  // 2. User-defined symbols in document
   for (const sym of parsedDoc.symbols.values()) {
     let itemKind: CompletionItemKind = CompletionItemKind.Variable;
     if (sym.kind === SymbolKind.Function) {
@@ -86,22 +118,60 @@ export function getM3Completions(
     });
   }
 
-  // 2. Built-in types
+  // 3. Imported packages & their qualified symbols
+  for (const [pkgName, pkg] of parsedDoc.importedPackages.entries()) {
+    // Add package name module
+    items.push({
+      label: pkgName,
+      kind: CompletionItemKind.Module,
+      detail: `package ${pkgName}`,
+      documentation: {
+        kind: MarkupKind.Markdown,
+        value: `**package ${pkgName}** (imported package)`,
+      },
+    });
+
+    // Add qualified symbols: pkg.Symbol
+    for (const sym of pkg.symbols.values()) {
+      let itemKind: CompletionItemKind = CompletionItemKind.Variable;
+      if (sym.kind === SymbolKind.Function) {
+        itemKind = CompletionItemKind.Function;
+      } else if (sym.kind === SymbolKind.Constant || sym.kind === SymbolKind.Define) {
+        itemKind = CompletionItemKind.Constant;
+      } else if (sym.kind === SymbolKind.Struct) {
+        itemKind = CompletionItemKind.Struct;
+      }
+
+      items.push({
+        label: `${pkgName}.${sym.name}`,
+        kind: itemKind,
+        detail: `${pkgName}.${sym.detail}`,
+        documentation: sym.docComment
+          ? {
+              kind: MarkupKind.Markdown,
+              value: sym.docComment,
+            }
+          : undefined,
+      });
+    }
+  }
+
+  // 4. Built-in types
   for (const entry of Object.values(M3_TYPES)) {
     items.push(docEntryToCompletionItem(entry));
   }
 
-  // 3. Storage specifiers
+  // 5. Storage specifiers
   for (const entry of Object.values(M3_STORAGE)) {
     items.push(docEntryToCompletionItem(entry));
   }
 
-  // 4. Built-in intrinsics
+  // 6. Built-in intrinsics
   for (const entry of Object.values(M3_INTRINSICS)) {
     items.push(docEntryToCompletionItem(entry));
   }
 
-  // 5. Language keywords and snippets
+  // 7. Language keywords and snippets
   for (const entry of Object.values(M3_KEYWORDS)) {
     items.push(docEntryToCompletionItem(entry));
   }

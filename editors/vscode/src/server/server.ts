@@ -37,7 +37,7 @@ function updateDocumentCache(document: TextDocument) {
     asmDocCache.set(document.uri, parseAsmDocument(text));
     m3DocCache.delete(document.uri);
   } else {
-    m3DocCache.set(document.uri, parseM3Document(text));
+    m3DocCache.set(document.uri, parseM3Document(text, document.uri));
     asmDocCache.delete(document.uri);
   }
 }
@@ -82,7 +82,7 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
   } else {
     let parsedDoc = m3DocCache.get(document.uri);
     if (!parsedDoc) {
-      parsedDoc = parseM3Document(document.getText());
+      parsedDoc = parseM3Document(document.getText(), document.uri);
       m3DocCache.set(document.uri, parsedDoc);
     }
     return getM3Completions(document, params.position, parsedDoc);
@@ -103,7 +103,7 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
   } else {
     let parsedDoc = m3DocCache.get(document.uri);
     if (!parsedDoc) {
-      parsedDoc = parseM3Document(document.getText());
+      parsedDoc = parseM3Document(document.getText(), document.uri);
       m3DocCache.set(document.uri, parsedDoc);
     }
     return getM3Hover(document, params.position, parsedDoc);

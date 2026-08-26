@@ -5,10 +5,16 @@ import { ASM_INSTRUCTIONS, ASM_DIRECTIVES, NES_REGISTERS } from '../data/asmDocs
 import { ParsedM3Document, SymbolKind } from '../parser/m3Parser';
 import { ParsedAsmDocument, AsmSymbolKind } from '../parser/asmParser';
 
+export interface WordContext {
+  rawWord: string;
+  subWord: string;
+  prefix?: string;
+}
+
 /**
- * Extracts the full word/identifier under the cursor, including dots (for directives) or @ (for local labels).
+ * Extracts the word and context under cursor, splitting dotted member access if applicable.
  */
-export function getWordAtPosition(document: TextDocument, position: Position): string | null {
+export function getWordAtPosition(document: TextDocument, position: Position): WordContext | null {
   const text = document.getText({
     start: { line: position.line, character: 0 },
     end: { line: position.line + 1, character: 0 },
@@ -21,15 +27,36 @@ export function getWordAtPosition(document: TextDocument, position: Position): s
     return null;
   }
 
-  // Regex to match identifiers, directives (with leading .), or local labels (with leading @)
-  const regex = /([.@a-zA-Z_][a-zA-Z0-9_:]*)/g;
+  const regex = /([.@a-zA-Z_][a-zA-Z0-9_.]*)/g;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(line)) !== null) {
     const start = match.index;
     const end = start + match[0].length;
     if (charIdx >= start && charIdx <= end) {
-      return match[0];
+      const full = match[0];
+      if (full.includes('.') && !full.startsWith('.')) {
+        const dotIdx = full.indexOf('.');
+        const splitPoint = start + dotIdx;
+        if (charIdx <= splitPoint) {
+          // Cursor is on package prefix before dot
+          return {
+            rawWord: full,
+            subWord: full.substring(0, dotIdx),
+          };
+        } else {
+          // Cursor is on member after dot
+          return {
+            rawWord: full,
+            subWord: full.substring(dotIdx + 1),
+            prefix: full.substring(0, dotIdx),
+          };
+        }
+      }
+      return {
+        rawWord: full,
+        subWord: full,
+      };
     }
   }
 
@@ -41,11 +68,50 @@ export function getM3Hover(
   position: Position,
   parsedDoc: ParsedM3Document
 ): Hover | null {
-  const word = getWordAtPosition(document, position);
-  if (!word) return null;
+  const wordCtx = getWordAtPosition(document, position);
+  if (!wordCtx) return null;
 
-  // 1. User-defined symbol in current document
-  const sym = parsedDoc.symbols.get(word);
+  const { rawWord, subWord, prefix } = wordCtx;
+
+  // 1. Check if hovering on member of imported package: e.g. cursor on "Disable" in "ppu.Disable"
+  if (prefix && parsedDoc.importedPackages.has(prefix)) {
+    const pkg = parsedDoc.importedPackages.get(prefix)!;
+    const sym = pkg.symbols.get(subWord);
+    if (sym) {
+      let md = `\`\`\`go\nfunc ${prefix}.${sym.detail.replace(/^func\s+/, '')}\n\`\`\``;
+      if (sym.kind === SymbolKind.Constant || sym.kind === SymbolKind.Define) {
+        md = `\`\`\`go\n${prefix}.${sym.detail}\n\`\`\``;
+      }
+      if (sym.docComment) {
+        md += `\n\n${sym.docComment}`;
+      }
+      return {
+        contents: {
+          kind: MarkupKind.Markdown,
+          value: md,
+        },
+      };
+    }
+  }
+
+  // 2. Check if hovering on imported package name: e.g. cursor on "ppu" in "ppu.Disable" or standalone "ppu"
+  if (parsedDoc.importedPackages.has(subWord)) {
+    const pkg = parsedDoc.importedPackages.get(subWord)!;
+    let md = `\`\`\`go\npackage ${subWord}\n\`\`\`\n\n**Imported package \`${subWord}\`**`;
+    const exportedSymbols = Array.from(pkg.symbols.values()).map((s) => `\`${s.name}\``);
+    if (exportedSymbols.length > 0) {
+      md += `\n\n**Exported Symbols:**\n${exportedSymbols.join(', ')}`;
+    }
+    return {
+      contents: {
+        kind: MarkupKind.Markdown,
+        value: md,
+      },
+    };
+  }
+
+  // 3. User-defined symbol in current document
+  const sym = parsedDoc.symbols.get(subWord);
   if (sym) {
     let md = `\`\`\`go\n${sym.detail}\n\`\`\``;
     if (sym.kind === SymbolKind.Struct && sym.fields && sym.fields.length > 0) {
@@ -68,7 +134,7 @@ export function getM3Hover(
   // Check if hovering over a struct field name
   for (const struct of parsedDoc.structs.values()) {
     if (struct.fields) {
-      const field = struct.fields.find((f) => f.name === word);
+      const field = struct.fields.find((f) => f.name === subWord);
       if (field) {
         let md = `\`\`\`go\n(field) ${struct.name}.${field.name} ${field.type}\n\`\`\``;
         if (field.docComment) {
@@ -84,9 +150,9 @@ export function getM3Hover(
     }
   }
 
-  // 2. Built-in types
-  if (M3_TYPES[word]) {
-    const entry = M3_TYPES[word];
+  // 4. Built-in types
+  if (M3_TYPES[subWord]) {
+    const entry = M3_TYPES[subWord];
     const md = `\`\`\`go\n${entry.detail}\n\`\`\`\n\n${entry.documentation}`;
     return {
       contents: {
@@ -96,9 +162,9 @@ export function getM3Hover(
     };
   }
 
-  // 3. Storage keywords
-  if (M3_STORAGE[word]) {
-    const entry = M3_STORAGE[word];
+  // 5. Storage keywords
+  if (M3_STORAGE[subWord]) {
+    const entry = M3_STORAGE[subWord];
     const md = `\`\`\`go\n${entry.detail}\n\`\`\`\n\n${entry.documentation}`;
     return {
       contents: {
@@ -108,9 +174,9 @@ export function getM3Hover(
     };
   }
 
-  // 4. Built-in intrinsics
-  if (M3_INTRINSICS[word]) {
-    const entry = M3_INTRINSICS[word];
+  // 6. Built-in intrinsics
+  if (M3_INTRINSICS[subWord]) {
+    const entry = M3_INTRINSICS[subWord];
     const md = `\`\`\`go\n${entry.detail}\n\`\`\`\n\n${entry.documentation}`;
     return {
       contents: {
@@ -120,9 +186,9 @@ export function getM3Hover(
     };
   }
 
-  // 5. Language keywords
-  if (M3_KEYWORDS[word]) {
-    const entry = M3_KEYWORDS[word];
+  // 7. Language keywords
+  if (M3_KEYWORDS[subWord]) {
+    const entry = M3_KEYWORDS[subWord];
     const md = `\`\`\`go\n${entry.detail}\n\`\`\`\n\n${entry.documentation}`;
     return {
       contents: {
@@ -140,8 +206,10 @@ export function getAsmHover(
   position: Position,
   parsedDoc: ParsedAsmDocument
 ): Hover | null {
-  const rawWord = getWordAtPosition(document, position);
-  if (!rawWord) return null;
+  const wordCtx = getWordAtPosition(document, position);
+  if (!wordCtx) return null;
+
+  const rawWord = wordCtx.rawWord;
 
   // 1. User-defined symbol (labels, procs, macros, defines)
   const sym = parsedDoc.symbols.get(rawWord);
