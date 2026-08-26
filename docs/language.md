@@ -54,22 +54,25 @@ The NES contains limited internal memory and relies on mapper hardware for bank 
 `m3` source files use the `.m3` extension. Each source file represents a distinct compilation unit that compiles to an object file (`.o`) or assembly output (`.s`).
 
 ### 2.2 The `import` Keyword
-The `import` statement allows a source file to import other `.m3` files by **relative path** (relative to the file containing the `import` statement). 
+The `import` statement allows a source file to import other `.m3` files:
+- **Library Includes** (paths not starting with `./` or `../`): Searched in the standard library (`pkg/data/lib/`, e.g. `import "oam.m3"` imports `pkg/data/lib/oam.m3`).
+- **Relative Paths** (starting with `./` or `../`): Resolved relative to the directory containing the importing source file (e.g. `import "./player.m3"`, `import "../common/constants.m3"`).
 
 Importing a file pulls all of its **exported symbols** (types, constants, variables, functions) into the current compilation unit as imported symbols.
 
 ```go
-// Single import
-import "math/vector.m3"
+// Library include from pkg/data/lib
+import "oam.m3"
 
 // Relative paths
+import "./player.m3"
 import "../common/constants.m3"
 
 // Grouped imports
 import (
-    "types.m3"
-    "audio/driver.m3"
-    "entities/actors.m3"
+    "oam.m3"
+    "./types.m3"
+    "../audio/driver.m3"
 )
 ```
 

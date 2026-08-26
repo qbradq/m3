@@ -3,10 +3,106 @@ package compiler
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/qbradq/m3/pkg/data"
 )
 
-// Compile parses an m3 source string into an AST and generates the assembly output.
+// ResolveImport searches for an imported file content and its canonical path.
+// If importPath is relative (starts with "./" or "../"), it is resolved relative
+// to currentFile's directory.
+// Otherwise, it searches the standard library directory (pkg/data/lib).
+func ResolveImport(currentFile, importPath string) ([]byte, string, error) {
+	normPath := filepath.FromSlash(importPath)
+
+	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
+		// Relative import: resolved relative to current file's directory
+		baseDir := filepath.Dir(currentFile)
+		targetPath := filepath.Clean(filepath.Join(baseDir, normPath))
+		content, err := os.ReadFile(targetPath)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to read relative import %q (resolved to %q): %w", importPath, targetPath, err)
+		}
+		return content, targetPath, nil
+	}
+
+	// Non-relative import: search standard library (pkg/data/lib)
+	// 1. Check embedded filesystem data.FS
+	fsPath := "lib/" + strings.TrimPrefix(filepath.ToSlash(importPath), "/")
+	if content, err := data.FS.ReadFile(fsPath); err == nil {
+		return content, "pkg/data/" + fsPath, nil
+	}
+
+	// 2. Check disk search paths relative to workspace
+	searchPaths := []string{
+		filepath.Join("pkg", "data", "lib", normPath),
+		filepath.Join("lib", normPath),
+	}
+	for _, sp := range searchPaths {
+		if content, err := os.ReadFile(sp); err == nil {
+			return content, sp, nil
+		}
+	}
+
+	// 3. Fallback: check relative to currentFile directory
+	baseDir := filepath.Dir(currentFile)
+	fallbackPath := filepath.Clean(filepath.Join(baseDir, normPath))
+	if content, err := os.ReadFile(fallbackPath); err == nil {
+		return content, fallbackPath, nil
+	}
+
+	return nil, "", fmt.Errorf("cannot find imported library %q in pkg/data/lib or relative paths", importPath)
+}
+
+func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[string]bool) error {
+	for _, imp := range file.Imports {
+		content, resolvedPath, err := ResolveImport(currentFile, imp.Path)
+		if err != nil {
+			return err
+		}
+		if visited[resolvedPath] {
+			continue
+		}
+		visited[resolvedPath] = true
+
+		impLexer := NewLexer(resolvedPath, string(content))
+		impParser := NewParser(impLexer)
+		impAST, err := impParser.ParseSourceFile()
+		if err != nil {
+			return fmt.Errorf("failed to parse import %q (%s): %w", imp.Path, resolvedPath, err)
+		}
+
+		if err := resolveAndMergeImports(impAST, resolvedPath, visited); err != nil {
+			return err
+		}
+
+		// Merge exported declarations from the imported AST into the current file
+		for _, decl := range impAST.Decls {
+			switch d := decl.(type) {
+			case *DefineDecl:
+				file.Decls = append(file.Decls, d)
+			case *ConstDecl:
+				if isExported(d.Name) {
+					file.Decls = append(file.Decls, d)
+				}
+			case *VarDecl:
+				if isExported(d.Name) {
+					file.Decls = append(file.Decls, d)
+				}
+			case *FuncDecl:
+				if isExported(d.Name) {
+					file.Decls = append(file.Decls, d)
+				}
+			case *TypeDecl:
+				file.Decls = append(file.Decls, d)
+			}
+		}
+	}
+	return nil
+}
+
+// Compile parses an m3 source string into an AST, resolves imports, and generates the assembly output.
 func Compile(filename, source string) (*SourceFile, string, error) {
 	lexer := NewLexer(filename, source)
 	parser := NewParser(lexer)
@@ -14,6 +110,15 @@ func Compile(filename, source string) (*SourceFile, string, error) {
 	astFile, err := parser.ParseSourceFile()
 	if err != nil {
 		return nil, "", err
+	}
+
+	visited := make(map[string]bool)
+	if filename != "" {
+		visited[filename] = true
+	}
+
+	if err := resolveAndMergeImports(astFile, filename, visited); err != nil {
+		return astFile, "", err
 	}
 
 	asmCode, err := generateAssembly(astFile)

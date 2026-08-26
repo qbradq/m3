@@ -1,5 +1,7 @@
 package main
 
+import "oam.m3"
+
 // Hardware Registers
 define (
     PPU_CTRL $2000
@@ -64,5 +66,12 @@ func main() bank 0 {
 
         frame_counter++
         update_enemies()
+        oam.Clear()
+        oam.AdvanceFlicker()
+        for i := uint8(0); i < 8; i++ {
+            if enemies[i].active {
+                oam.PutSprite(enemies[i].x, enemies[i].y, 0, 0)
+            }
+        }
     }
 }

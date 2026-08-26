@@ -9,6 +9,7 @@ import (
 
 	"github.com/qbradq/m3/pkg/asm"
 	"github.com/qbradq/m3/pkg/compiler"
+	"github.com/qbradq/m3/pkg/data"
 )
 
 func TestLinkSingleObject(t *testing.T) {
@@ -819,5 +820,104 @@ func main() bank 0 {
 		t.Fatalf("expected ROM size %d, got %d", TotalOutputSize, len(rom))
 	}
 }
+
+func TestLinkMRT0OAMFunctions(t *testing.T) {
+	src := `
+.import _oam_clear, _oam_advance_flicker, _oam_spr, _oam_spr_attr
+
+.bank 0
+.proc _main
+    ; 1. Clear OAM
+    JSR _oam_clear
+
+    ; 2. Write a single sprite (X=120, Y=100, Tile=$01, Attr=$00)
+    LDA #$00
+    STA _oam_spr_attr
+    LDA #120
+    LDX #100
+    LDY #$01
+    JSR _oam_spr
+
+    ; 3. Advance anti-flicker state
+    JSR _oam_advance_flicker
+    RTS
+.endproc
+`
+	objFile, err := asm.Assemble("game.s", src)
+	if err != nil {
+		t.Fatalf("failed to assemble: %v", err)
+	}
+
+	l := NewLinker(objFile)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link with mrt0 OAM functions: %v", err)
+	}
+
+	if len(rom) != TotalOutputSize {
+		t.Fatalf("expected ROM size %d, got %d", TotalOutputSize, len(rom))
+	}
+
+	// Verify that OAM functions were resolved and placed in Bank 63
+	bank63Offset := INESHeaderSize + 63*BankSize
+	resetAddr := binary.LittleEndian.Uint16(rom[bank63Offset+ResetVectorOffset : bank63Offset+ResetVectorOffset+2])
+	if resetAddr < 0xE000 {
+		t.Errorf("expected reset vector in Bank 63 ($E000-$FFFF), got $%04X", resetAddr)
+	}
+}
+
+func TestCompileAndLinkOAMLibrary(t *testing.T) {
+	oamContent, err := data.FS.ReadFile("lib/oam.m3")
+	if err != nil {
+		t.Fatalf("failed to read embedded lib/oam.m3: %v", err)
+	}
+
+	_, oamAsm, err := compiler.Compile("lib/oam.m3", string(oamContent))
+	if err != nil {
+		t.Fatalf("failed to compile lib/oam.m3: %v", err)
+	}
+
+	oamObj, err := asm.Assemble("oam.s", oamAsm)
+	if err != nil {
+		t.Fatalf("failed to assemble oam.s:\n%s\nerror: %v", oamAsm, err)
+	}
+
+	gameM3 := `
+package main
+
+func main() bank 0 {
+    asm {
+        JSR _Clear
+        LDA #$00
+        STA _oam_spr_attr
+        LDA #100
+        LDX #50
+        LDY #$10
+        JSR _PutSprite
+        JSR _AdvanceFlicker
+    }
+}
+`
+	_, gameAsm, err := compiler.Compile("game.m3", gameM3)
+	if err != nil {
+		t.Fatalf("failed to compile game.m3: %v", err)
+	}
+
+	gameObj, err := asm.Assemble("game.s", gameAsm)
+	if err != nil {
+		t.Fatalf("failed to assemble game.s: %v", err)
+	}
+
+	l := NewLinker(gameObj, oamObj)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link game with oam library: %v", err)
+	}
+
+	if len(rom) != TotalOutputSize {
+		t.Fatalf("expected ROM size %d, got %d", TotalOutputSize, len(rom))
+	}
+}
+
 
 

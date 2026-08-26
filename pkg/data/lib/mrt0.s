@@ -6,14 +6,30 @@
 ; Provides:
 ;   - reset_handler: Hardware initialization, memory clear, MMC3 configuration,
 ;                    and jump to m3 main entry point.
-;   - nmi_handler:   Context save, call _nmi (or stub), context restore, RTI.
+;   - nmi_handler:   Context save, OAM DMA transfer, call _nmi (or stub),
+;                    context restore, RTI.
 ;   - irq_handler:   Context save, call _irq (or stub), context restore, RTI.
+;   - oam_clear:     Hides all 64 sprites and resets OAM write offset.
+;   - oam_advance_flicker: Advances anti-flicker offset for sprite cycling.
+;   - oam_spr:       Writes a single sprite to OAM at next available location.
 ; ==============================================================================
 
 .export reset_handler, nmi_handler, irq_handler, __mrt0_stub_rts
+.export oam_clear, _oam_clear
+.export oam_advance_flicker, _oam_advance_flicker, oam_flicker, _oam_flicker
+.export oam_spr, _oam_spr, oam_put_sprite, _oam_put_sprite
+.export oam_off, _oam_off, oam_flicker_offset, _oam_flicker_offset, oam_spr_attr, _oam_spr_attr
 .import _main
 .import _nmi
 .import _irq
+
+; ==============================================================================
+; Zero Page Variables
+; ==============================================================================
+.zp
+oam_off:            .res 1      ; Current OAM buffer write offset ($00-$FC)
+oam_flicker_offset: .res 1      ; Anti-flicker frame starting offset ($00-$FC)
+oam_spr_attr:       .res 1      ; Attribute argument for oam_spr
 
 ; ==============================================================================
 ; Hardware Register Definitions
@@ -144,6 +160,9 @@ reset_handler:
     LDA #$00
     STA MMC3_IRQ_DISABLE
 
+    ; Initialize OAM buffer so sprites start hidden offscreen
+    JSR oam_clear
+
     ; Call m3 main function
     JSR _main
 
@@ -159,6 +178,12 @@ nmi_handler:
     PHA                         ; Save X Register
     TYA
     PHA                         ; Save Y Register
+
+    ; Trigger OAM DMA Transfer ($0200 -> PPU OAM)
+    LDA #$00
+    STA OAM_ADDR
+    LDA #$02
+    STA OAM_DMA
 
     JSR _nmi                    ; Call m3 nmi handler (or stub)
 
@@ -187,6 +212,96 @@ irq_handler:
     TAX                         ; Restore X Register
     PLA                         ; Restore Accumulator
     RTI
+
+; ------------------------------------------------------------------------------
+; OAM Management & Sprite Anti-Flicker Routines
+; ------------------------------------------------------------------------------
+
+; ------------------------------------------------------------------------------
+; oam_clear (_oam_clear):
+; Hides all 64 sprites in the OAM buffer ($0200-$02FF) by setting their Y
+; coordinate to $FF (offscreen) and resets the current write offset (oam_off)
+; to the current anti-flicker starting offset (oam_flicker_offset).
+; ------------------------------------------------------------------------------
+_oam_clear:
+oam_clear:
+    LDX #$00
+    LDA #$FF
+@clear_loop:
+    STA $0200, X                ; Set sprite Y to $FF (offscreen)
+    INX
+    INX
+    INX
+    INX
+    BNE @clear_loop
+
+    LDA oam_flicker_offset
+    STA oam_off                 ; Reset write offset to anti-flicker base
+    RTS
+
+; ------------------------------------------------------------------------------
+; oam_advance_flicker (_oam_advance_flicker, oam_flicker, _oam_flicker):
+; Advances the anti-flicker starting offset for the next frame.
+; Steps by 17 sprites (68 bytes = $44), which is coprime to 64, ensuring
+; an even rotation of hardware sprite priorities across frames.
+; ------------------------------------------------------------------------------
+_oam_advance_flicker:
+oam_advance_flicker:
+_oam_flicker:
+oam_flicker:
+    LDA oam_flicker_offset
+    CLC
+    ADC #$44                    ; Advance by 17 sprites ($44 bytes)
+    STA oam_flicker_offset
+    RTS
+
+; ------------------------------------------------------------------------------
+; oam_spr (_oam_spr, oam_put_sprite, _oam_put_sprite):
+; Writes a single 8x8 sprite into the OAM buffer ($0200-$02FF) at the next
+; available location (oam_off) and advances oam_off by 4.
+;
+; Calling Convention (Fastcall / m3 ABI):
+;   A:            Sprite X coordinate (0-255)
+;   X:            Sprite Y coordinate (0-255)
+;   Y:            Sprite Tile index   (0-255)
+;   oam_spr_attr: Sprite Attributes   (palette, flip, priority)
+;
+; OAM Buffer Layout:
+;   $0200 + offset + 0: Y coordinate
+;   $0200 + offset + 1: Tile index
+;   $0200 + offset + 2: Attributes
+;   $0200 + offset + 3: X coordinate
+; ------------------------------------------------------------------------------
+_oam_put_sprite:
+oam_put_sprite:
+_oam_spr:
+oam_spr:
+    PHA                         ; Save X coordinate (from A)
+    TYA
+    PHA                         ; Save Tile index (from Y)
+    TXA
+    PHA                         ; Save Y coordinate (from X)
+
+    LDX oam_off                 ; Load current OAM buffer offset
+
+    PLA
+    STA $0200, X                ; Byte 0: Y coordinate
+    INX
+
+    PLA
+    STA $0200, X                ; Byte 1: Tile index
+    INX
+
+    LDA oam_spr_attr
+    STA $0200, X                ; Byte 2: Attributes
+    INX
+
+    PLA
+    STA $0200, X                ; Byte 3: X coordinate
+    INX
+
+    STX oam_off                 ; Advance write offset (wraps at 256)
+    RTS
 
 ; ------------------------------------------------------------------------------
 ; Default RTS Stub (used if _nmi or _irq are not defined)
