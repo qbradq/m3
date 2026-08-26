@@ -522,31 +522,51 @@ func (p *Parser) parseFuncDecl() (*FuncDecl, error) {
 	funcName := p.curToken.Literal
 	p.nextToken()
 
-	// Parameter list: (param1 type, param2 type, ...)
+	// Parameter list: (param1 type, param2 type, ...) or (src, dst *uint8[], len uint16)
 	if !p.expect(TokenLParen) {
 		return nil, p.errorResult()
 	}
 
 	var params []*Param
 	for !p.curTokenIs(TokenRParen) && !p.curTokenIs(TokenEOF) {
-		paramPos := p.curToken.Pos
-		if !p.curTokenIs(TokenIdent) {
-			p.errorf("expected parameter name identifier, got %s (%q)", p.curToken.Type, p.curToken.Literal)
-			return nil, p.errorResult()
+		var groupNames []struct {
+			name string
+			pos  Position
 		}
-		paramName := p.curToken.Literal
-		p.nextToken()
+
+		for {
+			if !p.curTokenIs(TokenIdent) {
+				p.errorf("expected parameter name identifier, got %s (%q)", p.curToken.Type, p.curToken.Literal)
+				return nil, p.errorResult()
+			}
+			paramPos := p.curToken.Pos
+			paramName := p.curToken.Literal
+			p.nextToken()
+
+			groupNames = append(groupNames, struct {
+				name string
+				pos  Position
+			}{name: paramName, pos: paramPos})
+
+			if p.curTokenIs(TokenComma) {
+				p.nextToken()
+				continue
+			}
+			break
+		}
 
 		paramType, err := p.parseTypeSpec()
 		if err != nil {
 			return nil, err
 		}
 
-		params = append(params, &Param{
-			Name: paramName,
-			Type: paramType,
-			pos:  paramPos,
-		})
+		for _, g := range groupNames {
+			params = append(params, &Param{
+				Name: g.name,
+				Type: paramType,
+				pos:  g.pos,
+			})
+		}
 
 		if p.curTokenIs(TokenComma) {
 			p.nextToken()
@@ -613,49 +633,15 @@ func (p *Parser) isTypeStart(tok Token) bool {
 
 // parseTypeAndOptionalLength handles `type[length]` or `type[]` or `[length]type` or `*type` or `type`.
 func (p *Parser) parseTypeAndOptionalLength() (TypeSpec, Expr, error) {
-	// Check for leading bracket syntax e.g. [16]uint8
-	if p.curTokenIs(TokenLBracket) {
-		p.nextToken() // consume '['
-		var lengthExpr Expr
-		var err error
-		if !p.curTokenIs(TokenRBracket) {
-			lengthExpr, err = p.parseExpression(0)
-			if err != nil {
-				return nil, nil, err
-			}
-		}
-		if !p.expect(TokenRBracket) {
-			return nil, nil, p.errorResult()
-		}
-		elemType, err := p.parseTypeSpec()
-		if err != nil {
-			return nil, nil, err
-		}
-		return &ArrayType{Elem: elemType, Length: lengthExpr, pos: elemType.Pos()}, lengthExpr, nil
-	}
-
-	elemType, err := p.parseTypeSpec()
+	ts, err := p.parseTypeSpec()
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// Check for trailing bracket syntax e.g. uint8[16] or uint8[]
-	if p.curTokenIs(TokenLBracket) {
-		p.nextToken() // consume '['
-		var lengthExpr Expr
-		if !p.curTokenIs(TokenRBracket) {
-			lengthExpr, err = p.parseExpression(0)
-			if err != nil {
-				return nil, nil, err
-			}
-		}
-		if !p.expect(TokenRBracket) {
-			return nil, nil, p.errorResult()
-		}
-		return &ArrayType{Elem: elemType, Length: lengthExpr, pos: elemType.Pos()}, lengthExpr, nil
+	var lengthExpr Expr
+	if arr, ok := ts.(*ArrayType); ok {
+		lengthExpr = arr.Length
 	}
-
-	return elemType, nil, nil
+	return ts, lengthExpr, nil
 }
 
 func (p *Parser) parseTypeSpec() (TypeSpec, error) {
@@ -670,10 +656,46 @@ func (p *Parser) parseTypeSpec() (TypeSpec, error) {
 		return &PointerType{Elem: elem, pos: pos}, nil
 	}
 
+	if p.curTokenIs(TokenLBracket) {
+		p.nextToken() // consume '['
+		var lengthExpr Expr
+		var err error
+		if !p.curTokenIs(TokenRBracket) {
+			lengthExpr, err = p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if !p.expect(TokenRBracket) {
+			return nil, p.errorResult()
+		}
+		elemType, err := p.parseTypeSpec()
+		if err != nil {
+			return nil, err
+		}
+		return &ArrayType{Elem: elemType, Length: lengthExpr, pos: pos}, nil
+	}
+
 	if p.curTokenIs(TokenIdent) {
 		name := p.curToken.Literal
 		p.nextToken()
-		return &NamedType{Name: name, pos: pos}, nil
+		var baseType TypeSpec = &NamedType{Name: name, pos: pos}
+		if p.curTokenIs(TokenLBracket) {
+			p.nextToken() // consume '['
+			var lengthExpr Expr
+			var err error
+			if !p.curTokenIs(TokenRBracket) {
+				lengthExpr, err = p.parseExpression(0)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if !p.expect(TokenRBracket) {
+				return nil, p.errorResult()
+			}
+			baseType = &ArrayType{Elem: baseType, Length: lengthExpr, pos: pos}
+		}
+		return baseType, nil
 	}
 
 	p.errorf("expected type name or '*T', got %s (%q)", p.curToken.Type, p.curToken.Literal)

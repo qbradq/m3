@@ -1,6 +1,10 @@
 package main
 
-import "oam.m3"
+import (
+    "oam.m3"
+
+    "./data/data.m3"
+)
 
 // Hardware Registers
 define (

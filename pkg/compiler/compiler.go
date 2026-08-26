@@ -333,7 +333,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
 			sb.WriteString(fmt.Sprintf("%s:\n", name))
-			sb.WriteString("  .res 1\n")
+			sb.WriteString(fmt.Sprintf("  .res %d\n", typeSize(v.Type)))
 		}
 		sb.WriteString("\n")
 	}
@@ -347,7 +347,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
 			sb.WriteString(fmt.Sprintf("%s:\n", name))
-			sb.WriteString("  .res 1\n")
+			sb.WriteString(fmt.Sprintf("  .res %d\n", typeSize(v.Type)))
 		}
 		sb.WriteString("\n")
 	}
@@ -361,7 +361,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
 			sb.WriteString(fmt.Sprintf("%s:\n", name))
-			sb.WriteString("  .res 1\n")
+			sb.WriteString(fmt.Sprintf("  .res %d\n", typeSize(v.Type)))
 		}
 		sb.WriteString("\n")
 	}
@@ -376,6 +376,8 @@ func generateAssembly(file *SourceFile) (string, error) {
 				} else if num, ok := c.Bank.Value.(*NumberLit); ok {
 					sb.WriteString(fmt.Sprintf(".bank %d\n", num.Value))
 				}
+			} else {
+				sb.WriteString(".bank auto\n")
 			}
 			name := mangleSymbol(c.Name)
 			if isExported(c.Name) {
@@ -413,6 +415,8 @@ func generateAssembly(file *SourceFile) (string, error) {
 				} else if num, ok := f.Bank.Value.(*NumberLit); ok {
 					sb.WriteString(fmt.Sprintf(".bank %d\n", num.Value))
 				}
+			} else {
+				sb.WriteString(".bank auto\n")
 			}
 
 			name := mangleSymbol(f.Name)
@@ -537,5 +541,36 @@ func formatConstExpr(expr Expr) string {
 		return "0"
 	default:
 		return "0"
+	}
+}
+
+func typeSize(t TypeSpec) int {
+	if t == nil {
+		return 1
+	}
+	switch typ := t.(type) {
+	case *PointerType:
+		return 2
+	case *NamedType:
+		switch typ.Name {
+		case "uint8", "int8", "bool", "byte":
+			return 1
+		case "uint16", "int16":
+			return 2
+		case "uint32", "int32":
+			return 4
+		default:
+			return 1
+		}
+	case *ArrayType:
+		elemSize := typeSize(typ.Elem)
+		if typ.Length != nil {
+			if num, ok := typ.Length.(*NumberLit); ok && num.Value > 0 {
+				return elemSize * int(num.Value)
+			}
+		}
+		return elemSize
+	default:
+		return 1
 	}
 }

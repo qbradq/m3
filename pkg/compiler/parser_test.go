@@ -357,3 +357,74 @@ func TestParseDefineDecl(t *testing.T) {
 		t.Errorf("expected DefineDeclStmt in foo(), got %T", fn.Body.Stmts[0])
 	}
 }
+
+func TestParsePointerAndGroupedParams(t *testing.T) {
+	src := `
+	package main
+
+	func DirectUploadPalette(pal *uint8[32]) {
+	}
+
+	func Copy(src, dst *uint8[], len uint16) {
+	}
+
+	func DirectUpload(src *uint8[], ppu_dst, len uint16) {
+	}
+	`
+	lexer := NewLexer("lib_sig.m3", src)
+	parser := NewParser(lexer)
+	file, err := parser.ParseSourceFile()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	if len(file.Decls) != 3 {
+		t.Fatalf("expected 3 decls, got %d", len(file.Decls))
+	}
+
+	f1, ok := file.Decls[0].(*FuncDecl)
+	if !ok || f1.Name != "DirectUploadPalette" {
+		t.Fatalf("expected FuncDecl DirectUploadPalette, got %+v", file.Decls[0])
+	}
+	if len(f1.Params) != 1 {
+		t.Fatalf("expected 1 param, got %d", len(f1.Params))
+	}
+	if f1.Params[0].Name != "pal" {
+		t.Errorf("expected param name pal, got %s", f1.Params[0].Name)
+	}
+	ptrType, ok := f1.Params[0].Type.(*PointerType)
+	if !ok {
+		t.Fatalf("expected PointerType, got %T", f1.Params[0].Type)
+	}
+	arrType, ok := ptrType.Elem.(*ArrayType)
+	if !ok {
+		t.Fatalf("expected ArrayType inside PointerType, got %T", ptrType.Elem)
+	}
+	if named, ok := arrType.Elem.(*NamedType); !ok || named.Name != "uint8" {
+		t.Errorf("expected named type uint8, got %+v", arrType.Elem)
+	}
+
+	f2, ok := file.Decls[1].(*FuncDecl)
+	if !ok || f2.Name != "Copy" {
+		t.Fatalf("expected FuncDecl Copy, got %+v", file.Decls[1])
+	}
+	if len(f2.Params) != 3 {
+		t.Fatalf("expected 3 params, got %d", len(f2.Params))
+	}
+	if f2.Params[0].Name != "src" || f2.Params[1].Name != "dst" || f2.Params[2].Name != "len" {
+		t.Errorf("expected params [src dst len], got [%s %s %s]", f2.Params[0].Name, f2.Params[1].Name, f2.Params[2].Name)
+	}
+
+	f3, ok := file.Decls[2].(*FuncDecl)
+	if !ok || f3.Name != "DirectUpload" {
+		t.Fatalf("expected FuncDecl DirectUpload, got %+v", file.Decls[2])
+	}
+	if len(f3.Params) != 3 {
+		t.Fatalf("expected 3 params for DirectUpload, got %d", len(f3.Params))
+	}
+	if f3.Params[0].Name != "src" || f3.Params[1].Name != "ppu_dst" || f3.Params[2].Name != "len" {
+		t.Errorf("expected params [src ppu_dst len], got [%s %s %s]", f3.Params[0].Name, f3.Params[1].Name, f3.Params[2].Name)
+	}
+}
+
+

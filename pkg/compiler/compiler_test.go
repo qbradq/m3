@@ -397,3 +397,91 @@ func main() bank 0 {
 	}
 }
 
+func TestBuildPPULibrary(t *testing.T) {
+	tmpDir := t.TempDir()
+	mainPath := filepath.Join(tmpDir, "main.m3")
+	mainSrc := `
+package main
+
+import "ppu.m3"
+
+const my_palette uint8[32] = [32]uint8{
+    $0F, $00, $10, $30, $0F, $01, $11, $31,
+    $0F, $02, $12, $32, $0F, $03, $13, $33,
+    $0F, $04, $14, $34, $0F, $05, $15, $35,
+    $0F, $06, $16, $36, $0F, $07, $17, $37,
+}
+
+func main() bank 0 {
+    asm {
+        JSR _Disable
+        LDA #<my_palette
+        LDX #>my_palette
+        JSR _DirectUploadPalette
+        JSR _Enable
+    }
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0644); err != nil {
+		t.Fatalf("failed to write main.m3: %v", err)
+	}
+
+	rom, err := Build([]string{mainPath})
+	if err != nil {
+		t.Fatalf("Build with ppu.m3 failed: %v", err)
+	}
+
+	if len(rom) != 16+64*8192 {
+		t.Fatalf("expected ROM size %d, got %d", 16+64*8192, len(rom))
+	}
+}
+
+func TestBuildMemoryLibrary(t *testing.T) {
+	tmpDir := t.TempDir()
+	mainPath := filepath.Join(tmpDir, "main.m3")
+	mainSrc := `
+package main
+
+import "memory.m3"
+
+var (
+    buf_src uint8[64] ram
+    buf_dst uint8[64] ram
+)
+
+func main() bank 0 {
+    asm {
+        LDA #<buf_src
+        STA _src_ptr
+        LDA #>buf_src
+        STA _src_ptr+1
+
+        LDA #<buf_dst
+        STA _dst_ptr
+        LDA #>buf_dst
+        STA _dst_ptr+1
+
+        LDA #64
+        STA _len_cnt
+        LDA #0
+        STA _len_cnt+1
+
+        JSR _Copy
+    }
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0644); err != nil {
+		t.Fatalf("failed to write main.m3: %v", err)
+	}
+
+	rom, err := Build([]string{mainPath})
+	if err != nil {
+		t.Fatalf("Build with memory.m3 failed: %v", err)
+	}
+
+	if len(rom) != 16+64*8192 {
+		t.Fatalf("expected ROM size %d, got %d", 16+64*8192, len(rom))
+	}
+}
+
+

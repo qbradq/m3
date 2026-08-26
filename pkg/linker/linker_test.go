@@ -912,5 +912,107 @@ _oam_spr_attr:
 	}
 }
 
+func TestLinkPPULibraryAsm(t *testing.T) {
+	ppuAsm := `
+.export _Disable, _Enable, _DirectUploadPalette
+.export _pal_ptr
+
+.zp
+_pal_ptr:
+  .res 2
+
+.bank auto
+.proc _Disable
+  RTS
+.endproc
+
+.proc _Enable
+  RTS
+.endproc
+
+.proc _DirectUploadPalette
+  RTS
+.endproc
+`
+	ppuObj, err := asm.Assemble("ppu.s", ppuAsm)
+	if err != nil {
+		t.Fatalf("failed to assemble ppu.s:\n%s\nerror: %v", ppuAsm, err)
+	}
+
+	gameAsm := `
+.export _main
+.bank 0
+.proc _main
+    JSR _Disable
+    JSR _DirectUploadPalette
+    JSR _Enable
+    RTS
+.endproc
+`
+	gameObj, err := asm.Assemble("game.s", gameAsm)
+	if err != nil {
+		t.Fatalf("failed to assemble game.s: %v", err)
+	}
+
+	l := NewLinker(gameObj, ppuObj)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link game with ppu library: %v", err)
+	}
+
+	if len(rom) != TotalOutputSize {
+		t.Fatalf("expected ROM size %d, got %d", TotalOutputSize, len(rom))
+	}
+}
+
+func TestLinkMemoryLibraryAsm(t *testing.T) {
+	memAsm := `
+.export _Copy
+.export _src_ptr, _dst_ptr, _len_cnt
+
+.zp
+_src_ptr:
+  .res 2
+_dst_ptr:
+  .res 2
+_len_cnt:
+  .res 2
+
+.bank auto
+.proc _Copy
+  RTS
+.endproc
+`
+	memObj, err := asm.Assemble("memory.s", memAsm)
+	if err != nil {
+		t.Fatalf("failed to assemble memory.s:\n%s\nerror: %v", memAsm, err)
+	}
+
+	gameAsm := `
+.export _main
+.bank 0
+.proc _main
+    JSR _Copy
+    RTS
+.endproc
+`
+	gameObj, err := asm.Assemble("game.s", gameAsm)
+	if err != nil {
+		t.Fatalf("failed to assemble game.s: %v", err)
+	}
+
+	l := NewLinker(gameObj, memObj)
+	rom, err := l.Link()
+	if err != nil {
+		t.Fatalf("failed to link game with memory library: %v", err)
+	}
+
+	if len(rom) != TotalOutputSize {
+		t.Fatalf("expected ROM size %d, got %d", TotalOutputSize, len(rom))
+	}
+}
+
+
+
 
 

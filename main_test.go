@@ -116,3 +116,49 @@ func TestHandleBuildMissingInput(t *testing.T) {
 		t.Fatal("expected error for missing input files, got nil")
 	}
 }
+
+func TestHandleBuildStandardLibraries(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcFile := filepath.Join(tmpDir, "full_game.m3")
+	outFile := filepath.Join(tmpDir, "full_game.nes")
+	src := `
+package main
+
+import (
+    "oam.m3"
+    "ppu.m3"
+    "memory.m3"
+)
+
+var (
+    palette_data uint8[32] ram
+    dest_buf     uint8[32] ram
+)
+
+func main() bank 0 {
+    ppu.Disable()
+    oam.Clear()
+    oam.AdvanceFlicker()
+    oam.PutSprite(100, 50, 1, 0)
+    ppu.DirectUploadPalette(palette_data)
+    memory.Copy(palette_data, dest_buf, 32)
+    ppu.Enable()
+}
+`
+	if err := os.WriteFile(srcFile, []byte(src), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	if err := handleBuild([]string{srcFile, "-o", outFile}); err != nil {
+		t.Fatalf("handleBuild failed: %v", err)
+	}
+
+	stat, err := os.Stat(outFile)
+	if err != nil {
+		t.Fatalf("expected output %s was not created: %v", outFile, err)
+	}
+	if stat.Size() != 524304 {
+		t.Errorf("expected file size 524304, got %d", stat.Size())
+	}
+}
+
