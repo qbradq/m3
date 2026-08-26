@@ -43,5 +43,7 @@ m3
 # Node / VSCode extension
 node_modules/
 dist/
+out/
+*.tsbuildinfo
 *.vsix
 
