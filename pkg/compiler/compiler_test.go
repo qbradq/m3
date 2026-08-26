@@ -133,15 +133,12 @@ func main() bank 0 {
 		t.Fatalf("compilation with standard library import failed: %v", err)
 	}
 
-	// Verify that definitions from oam.m3 were imported
+	// Verify that compile-time definitions from oam.m3 were imported
 	expectedSnippets := []string{
-		".export _OAM_BUFFER",
 		".define _OAM_BUFFER $0200",
-		".export _SPR_PAL0",
-		".export _Clear",
-		".proc _Clear",
-		".export _PutSprite",
-		".proc _PutSprite",
+		".define _SPR_PAL0 0",
+		".proc _main",
+		"JSR _Clear",
 	}
 
 	for _, snippet := range expectedSnippets {
@@ -196,9 +193,6 @@ func main() bank 0 {
 	if !strings.Contains(asmOutput, "_LOCAL_SPR_COUNT") {
 		t.Errorf("expected local oam.m3 definition _LOCAL_SPR_COUNT, got:\n%s", asmOutput)
 	}
-	if !strings.Contains(asmOutput, "_LocalHelper") {
-		t.Errorf("expected local oam.m3 proc _LocalHelper, got:\n%s", asmOutput)
-	}
 
 	// 3. Test relative import failure when file does not exist in local directory
 	missingGameSrc := `
@@ -214,6 +208,192 @@ func main() bank 0 {}
 	}
 	if !strings.Contains(err.Error(), "failed to read relative import") {
 		t.Errorf("expected missing relative import error message, got: %v", err)
+	}
+}
+
+func TestBuildSingleFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	mainPath := filepath.Join(tmpDir, "main.m3")
+	mainSrc := `
+package main
+
+var counter uint8 zp
+
+func main() bank 0 {
+    counter++
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0644); err != nil {
+		t.Fatalf("failed to write main.m3: %v", err)
+	}
+
+	rom, err := Build([]string{mainPath})
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	if len(rom) != 16+64*8192 {
+		t.Fatalf("expected ROM size %d, got %d", 16+64*8192, len(rom))
+	}
+}
+
+func TestBuildWithStandardLibrary(t *testing.T) {
+	tmpDir := t.TempDir()
+	gamePath := filepath.Join(tmpDir, "game.m3")
+	gameSrc := `
+package main
+
+import "oam.m3"
+
+func main() bank 0 {
+    oam.Clear()
+    oam.AdvanceFlicker()
+    oam.PutSprite(10, 20, 1, 0)
+}
+`
+	if err := os.WriteFile(gamePath, []byte(gameSrc), 0644); err != nil {
+		t.Fatalf("failed to write game.m3: %v", err)
+	}
+
+	outNES := filepath.Join(tmpDir, "game.nes")
+	if err := BuildFiles([]string{gamePath}, outNES); err != nil {
+		t.Fatalf("BuildFiles failed: %v", err)
+	}
+
+	stat, err := os.Stat(outNES)
+	if err != nil {
+		t.Fatalf("output NES ROM does not exist: %v", err)
+	}
+	if stat.Size() != int64(16+64*8192) {
+		t.Fatalf("expected NES ROM size %d, got %d", 16+64*8192, stat.Size())
+	}
+}
+
+func TestBuildCyclicImports(t *testing.T) {
+	tmpDir := t.TempDir()
+	aPath := filepath.Join(tmpDir, "a.m3")
+	bPath := filepath.Join(tmpDir, "b.m3")
+
+	// a.m3 imports b.m3, b.m3 imports a.m3
+	aSrc := `
+package a
+
+import "./b.m3"
+
+define CONST_A 100
+
+func FuncA() bank auto {
+    asm {
+        JSR _FuncB
+    }
+}
+
+func main() bank 0 {
+    FuncA()
+}
+`
+	bSrc := `
+package b
+
+import "./a.m3"
+
+define CONST_B 200
+
+func FuncB() bank auto {
+    asm {
+        NOP
+    }
+}
+`
+	if err := os.WriteFile(aPath, []byte(aSrc), 0644); err != nil {
+		t.Fatalf("failed to write a.m3: %v", err)
+	}
+	if err := os.WriteFile(bPath, []byte(bSrc), 0644); err != nil {
+		t.Fatalf("failed to write b.m3: %v", err)
+	}
+
+	rom, err := Build([]string{aPath})
+	if err != nil {
+		t.Fatalf("Build with cyclic imports failed: %v", err)
+	}
+
+	if len(rom) != 16+64*8192 {
+		t.Fatalf("expected ROM size %d, got %d", 16+64*8192, len(rom))
+	}
+}
+
+func TestBuildDiamondImports(t *testing.T) {
+	tmpDir := t.TempDir()
+	aPath := filepath.Join(tmpDir, "a.m3")
+	bPath := filepath.Join(tmpDir, "b.m3")
+	cPath := filepath.Join(tmpDir, "c.m3")
+	dPath := filepath.Join(tmpDir, "d.m3")
+
+	// A imports B and C. Both B and C import D.
+	dSrc := `
+package d
+define BASE_VAL 42
+func HelperD() bank auto {
+    asm { NOP }
+}
+`
+	bSrc := `
+package b
+import "./d.m3"
+func HelperB() bank auto {
+    asm { JSR _HelperD }
+}
+`
+	cSrc := `
+package c
+import "./d.m3"
+func HelperC() bank auto {
+    asm { JSR _HelperD }
+}
+`
+	aSrc := `
+package main
+import (
+    "./b.m3"
+    "./c.m3"
+)
+func main() bank 0 {
+    asm {
+        JSR _HelperB
+        JSR _HelperC
+    }
+}
+`
+	if err := os.WriteFile(dPath, []byte(dSrc), 0644); err != nil {
+		t.Fatalf("failed to write d.m3: %v", err)
+	}
+	if err := os.WriteFile(bPath, []byte(bSrc), 0644); err != nil {
+		t.Fatalf("failed to write b.m3: %v", err)
+	}
+	if err := os.WriteFile(cPath, []byte(cSrc), 0644); err != nil {
+		t.Fatalf("failed to write c.m3: %v", err)
+	}
+	if err := os.WriteFile(aPath, []byte(aSrc), 0644); err != nil {
+		t.Fatalf("failed to write a.m3: %v", err)
+	}
+
+	units, err := AccumulateSourceFiles([]string{aPath})
+	if err != nil {
+		t.Fatalf("AccumulateSourceFiles failed: %v", err)
+	}
+
+	// Should have exactly 4 unique files: a, b, d, c (or a, b, c, d)
+	if len(units) != 4 {
+		t.Fatalf("expected 4 accumulated units, got %d", len(units))
+	}
+
+	rom, err := Build([]string{aPath})
+	if err != nil {
+		t.Fatalf("Build with diamond imports failed: %v", err)
+	}
+
+	if len(rom) != 16+64*8192 {
+		t.Fatalf("expected ROM size %d, got %d", 16+64*8192, len(rom))
 	}
 }
 

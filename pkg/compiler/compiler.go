@@ -6,8 +6,18 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/qbradq/m3/pkg/asm"
 	"github.com/qbradq/m3/pkg/data"
+	"github.com/qbradq/m3/pkg/linker"
+	"github.com/qbradq/m3/pkg/obj"
 )
+
+// SourceUnit represents an accumulated .m3 source file ready for compilation.
+type SourceUnit struct {
+	Path    string
+	Content string
+	AST     *SourceFile
+}
 
 // ResolveImport searches for an imported file content and its canonical path.
 // If importPath is relative (starts with "./" or "../"), it is resolved relative
@@ -21,10 +31,20 @@ func ResolveImport(currentFile, importPath string) ([]byte, string, error) {
 		baseDir := filepath.Dir(currentFile)
 		targetPath := filepath.Clean(filepath.Join(baseDir, normPath))
 		content, err := os.ReadFile(targetPath)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to read relative import %q (resolved to %q): %w", importPath, targetPath, err)
+		if err == nil {
+			return content, targetPath, nil
 		}
-		return content, targetPath, nil
+
+		// Also check embedded filesystem if resolving within embedded pkg/data/lib path
+		normTarget := filepath.ToSlash(targetPath)
+		if strings.HasPrefix(normTarget, "pkg/data/lib/") {
+			fsPath := strings.TrimPrefix(normTarget, "pkg/data/")
+			if c, errFs := data.FS.ReadFile(fsPath); errFs == nil {
+				return c, targetPath, nil
+			}
+		}
+
+		return nil, "", fmt.Errorf("failed to read relative import %q (resolved to %q): %w", importPath, targetPath, err)
 	}
 
 	// Non-relative import: search standard library (pkg/data/lib)
@@ -77,28 +97,124 @@ func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[st
 			return err
 		}
 
-		// Merge exported declarations from the imported AST into the current file
+		// Merge compile-time definitions and types from the imported AST into the current file
 		for _, decl := range impAST.Decls {
 			switch d := decl.(type) {
 			case *DefineDecl:
 				file.Decls = append(file.Decls, d)
-			case *ConstDecl:
-				if isExported(d.Name) {
-					file.Decls = append(file.Decls, d)
-				}
-			case *VarDecl:
-				if isExported(d.Name) {
-					file.Decls = append(file.Decls, d)
-				}
-			case *FuncDecl:
-				if isExported(d.Name) {
-					file.Decls = append(file.Decls, d)
-				}
 			case *TypeDecl:
 				file.Decls = append(file.Decls, d)
 			}
 		}
 	}
+	return nil
+}
+
+// AccumulateSourceFiles recursively traverses all input .m3 files and their imports,
+// safely handling circular references and loops, and returns a list of unique SourceUnits.
+func AccumulateSourceFiles(entryFiles []string) ([]*SourceUnit, error) {
+	if len(entryFiles) == 0 {
+		return nil, fmt.Errorf("no input files provided")
+	}
+
+	var units []*SourceUnit
+	visited := make(map[string]bool)
+
+	var accumulate func(filePath string, content []byte) error
+	accumulate = func(filePath string, content []byte) error {
+		cleanPath := filepath.Clean(filePath)
+		if visited[cleanPath] {
+			return nil
+		}
+		visited[cleanPath] = true
+
+		if content == nil {
+			dataBytes, err := os.ReadFile(cleanPath)
+			if err != nil {
+				return fmt.Errorf("failed to read source file %q: %w", cleanPath, err)
+			}
+			content = dataBytes
+		}
+
+		srcStr := string(content)
+		lexer := NewLexer(cleanPath, srcStr)
+		parser := NewParser(lexer)
+		astFile, err := parser.ParseSourceFile()
+		if err != nil {
+			return fmt.Errorf("failed to parse source file %q: %w", cleanPath, err)
+		}
+
+		units = append(units, &SourceUnit{
+			Path:    cleanPath,
+			Content: srcStr,
+			AST:     astFile,
+		})
+
+		for _, imp := range astFile.Imports {
+			impContent, resolvedPath, err := ResolveImport(cleanPath, imp.Path)
+			if err != nil {
+				return err
+			}
+			if err := accumulate(resolvedPath, impContent); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	for _, file := range entryFiles {
+		if err := accumulate(file, nil); err != nil {
+			return nil, err
+		}
+	}
+
+	return units, nil
+}
+
+// Build compiles one or more .m3 source files by recursively accumulating imported .m3 files,
+// compiling all of them into object files in memory, and linking all object files into the final NES ROM bytes.
+func Build(entryFiles []string) ([]byte, error) {
+	units, err := AccumulateSourceFiles(entryFiles)
+	if err != nil {
+		return nil, err
+	}
+
+	var objects []*obj.ObjectFile
+	for _, unit := range units {
+		_, asmCode, err := Compile(unit.Path, unit.Content)
+		if err != nil {
+			return nil, fmt.Errorf("compilation failed for %q: %w", unit.Path, err)
+		}
+
+		objFile, err := asm.Assemble(unit.Path, asmCode)
+		if err != nil {
+			return nil, fmt.Errorf("assembly failed for %q:\n%s\nerror: %w", unit.Path, asmCode, err)
+		}
+
+		objects = append(objects, objFile)
+	}
+
+	linkerInst := linker.NewLinker(objects...)
+	romData, err := linkerInst.Link()
+	if err != nil {
+		return nil, fmt.Errorf("linking failed: %w", err)
+	}
+
+	return romData, nil
+}
+
+// BuildFiles compiles the given input .m3 files and writes the linked NES ROM to outputFile.
+func BuildFiles(inputFiles []string, outputFile string) error {
+	romData, err := Build(inputFiles)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(outputFile, romData, 0644); err != nil {
+		return fmt.Errorf("failed to write NES ROM %q: %w", outputFile, err)
+	}
+
 	return nil
 }
 
@@ -201,7 +317,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 		sb.WriteString("; Compile-time Definitions\n")
 		for _, d := range defineDecls {
 			name := mangleSymbol(d.Name)
-			if isExported(d.Name) {
+			if isExported(d.Name) && (d.Pos().Filename == "" || d.Pos().Filename == file.Pos().Filename) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
 			sb.WriteString(fmt.Sprintf(".define %s %s\n\n", name, formatConstExpr(d.Value)))

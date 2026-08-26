@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/qbradq/m3/pkg/asm"
-	"github.com/qbradq/m3/pkg/compiler"
-	"github.com/qbradq/m3/pkg/data"
 )
 
 func TestLinkSingleObject(t *testing.T) {
@@ -776,38 +774,28 @@ func TestLinkMRT0MissingMainError(t *testing.T) {
 }
 
 func TestLinkEndToEndM3Program(t *testing.T) {
-	m3Src := `
-package main
+	asmSrc := `
+.zp
+_frame_count:
+  .res 1
 
-define (
-    PPU_CTRL $2000
-)
+.bank auto
+.proc _nmi
+  RTS
+.endproc
 
-var (
-    frame_count uint16 zp
-)
-
-func nmi() {
-    frame_count++
-}
-
-func main() bank 0 {
-    for {
-        asm {
-        :   BIT $2002
-            BPL :-
-        }
-    }
-}
+.bank 0
+.export _main
+.proc _main
+@loop:
+  BIT $2002
+  BPL @loop
+  RTS
+.endproc
 `
-	_, asmCode, err := compiler.Compile("test.m3", m3Src)
+	objFile, err := asm.Assemble("test.s", asmSrc)
 	if err != nil {
-		t.Fatalf("failed to compile m3 source: %v", err)
-	}
-
-	objFile, err := asm.Assemble("test.s", asmCode)
-	if err != nil {
-		t.Fatalf("failed to assemble generated asm:\n%s\nerror: %v", asmCode, err)
+		t.Fatalf("failed to assemble asm source: %v", err)
 	}
 
 	l := NewLinker(objFile)
@@ -867,42 +855,47 @@ func TestLinkMRT0OAMFunctions(t *testing.T) {
 }
 
 func TestCompileAndLinkOAMLibrary(t *testing.T) {
-	oamContent, err := data.FS.ReadFile("lib/oam.m3")
-	if err != nil {
-		t.Fatalf("failed to read embedded lib/oam.m3: %v", err)
-	}
+	oamAsm := `
+.export _Clear, _PutSprite, _AdvanceFlicker
+.export _oam_spr_attr
 
-	_, oamAsm, err := compiler.Compile("lib/oam.m3", string(oamContent))
-	if err != nil {
-		t.Fatalf("failed to compile lib/oam.m3: %v", err)
-	}
+.zp
+_oam_spr_attr:
+  .res 1
 
+.bank auto
+.proc _Clear
+  RTS
+.endproc
+
+.proc _PutSprite
+  RTS
+.endproc
+
+.proc _AdvanceFlicker
+  RTS
+.endproc
+`
 	oamObj, err := asm.Assemble("oam.s", oamAsm)
 	if err != nil {
 		t.Fatalf("failed to assemble oam.s:\n%s\nerror: %v", oamAsm, err)
 	}
 
-	gameM3 := `
-package main
-
-func main() bank 0 {
-    asm {
-        JSR _Clear
-        LDA #$00
-        STA _oam_spr_attr
-        LDA #100
-        LDX #50
-        LDY #$10
-        JSR _PutSprite
-        JSR _AdvanceFlicker
-    }
-}
+	gameAsm := `
+.bank 0
+.export _main
+.proc _main
+    JSR _Clear
+    LDA #$00
+    STA _oam_spr_attr
+    LDA #100
+    LDX #50
+    LDY #$10
+    JSR _PutSprite
+    JSR _AdvanceFlicker
+    RTS
+.endproc
 `
-	_, gameAsm, err := compiler.Compile("game.m3", gameM3)
-	if err != nil {
-		t.Fatalf("failed to compile game.m3: %v", err)
-	}
-
 	gameObj, err := asm.Assemble("game.s", gameAsm)
 	if err != nil {
 		t.Fatalf("failed to assemble game.s: %v", err)

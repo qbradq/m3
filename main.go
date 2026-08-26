@@ -20,6 +20,11 @@ func main() {
 
 	command := os.Args[1]
 	switch command {
+	case "build":
+		if err := handleBuild(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "m3 build error: %v\n", err)
+			os.Exit(1)
+		}
 	case "compile":
 		if err := handleCompile(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "m3 compile error: %v\n", err)
@@ -55,12 +60,57 @@ func printUsage() {
 	fmt.Println("Usage: m3 <command> [arguments]")
 	fmt.Println()
 	fmt.Println("Commands:")
+	fmt.Println("  build <input.m3...> [-o output.nes]  Build and link .m3 source files into an NES ROM (.nes)")
 	fmt.Println("  compile <input.m3> [output.s]        Compile an m3 source file into an assembly file")
 	fmt.Println("  assemble <input.s> [output.mo]       Assemble an assembly file into an intermediate object file")
 	fmt.Println("  link <input.mo...> [output.nes]      Link one or more object files into an NES ROM (.nes)")
 	fmt.Println("  dump-obj <file.mo>                   Inspect and dump the contents of an object file")
 	fmt.Println("  version                              Display the m3 version")
 	fmt.Println("  help                                 Display this help message")
+}
+
+func handleBuild(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("missing input files\nUsage: m3 build <input.m3...> [-o output.nes]")
+	}
+
+	var inputFiles []string
+	var outputFile string
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-o" || arg == "--output" {
+			if i+1 >= len(args) {
+				return fmt.Errorf("missing argument for %s flag", arg)
+			}
+			outputFile = args[i+1]
+			i++
+		} else {
+			inputFiles = append(inputFiles, arg)
+		}
+	}
+
+	if len(inputFiles) == 0 {
+		return fmt.Errorf("missing input source files\nUsage: m3 build <input.m3...> [-o output.nes]")
+	}
+
+	for _, file := range inputFiles {
+		if strings.ToLower(filepath.Ext(file)) != ".m3" {
+			return fmt.Errorf("invalid input file %q: all input files must be .m3 source files", file)
+		}
+	}
+
+	if outputFile == "" {
+		first := inputFiles[0]
+		ext := filepath.Ext(first)
+		if ext != "" {
+			outputFile = strings.TrimSuffix(first, ext) + ".nes"
+		} else {
+			outputFile = first + ".nes"
+		}
+	}
+
+	return compiler.BuildFiles(inputFiles, outputFile)
 }
 
 func handleCompile(args []string) error {
