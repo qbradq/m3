@@ -1085,8 +1085,227 @@ main:
 	}
 }
 
+func TestGenerateMesenSymbols(t *testing.T) {
+	src := `
+.export main, PPU_CTRL, player_x, score, high_score
+PPU_CTRL = $2000
 
+.zp
+player_x: .res 1
 
+.ram
+score: .res 2
 
+.wram
+high_score: .res 4
 
+.bank 1
+.code
+main:
+    LDA #$00
+    STA player_x
+    RTS
+`
+	objFile, err := asm.Assemble("game.s", src)
+	if err != nil {
+		t.Fatalf("failed to assemble: %v", err)
+	}
 
+	l := NewLinker(objFile)
+	_, err = l.Link()
+	if err != nil {
+		t.Fatalf("failed to link: %v", err)
+	}
+
+	symbols := l.GenerateMesenSymbols()
+	if symbols == "" {
+		t.Fatalf("expected non-empty symbols output")
+	}
+
+	// Verify constant: G:2000:PPU_CTRL
+	if !strings.Contains(symbols, "G:2000:PPU_CTRL\n") {
+		t.Errorf("expected G:2000:PPU_CTRL in symbols, got:\n%s", symbols)
+	}
+
+	// Verify zero page RAM: R:0:player_x
+	if !strings.Contains(symbols, "R:0:player_x\n") {
+		t.Errorf("expected R:0:player_x in symbols, got:\n%s", symbols)
+	}
+
+	// Verify main RAM: R:300:score
+	if !strings.Contains(symbols, "R:300:score\n") {
+		t.Errorf("expected R:300:score in symbols, got:\n%s", symbols)
+	}
+
+	// Verify WRAM / Save RAM: S:0:high_score
+	if !strings.Contains(symbols, "S:0:high_score\n") {
+		t.Errorf("expected S:0:high_score in symbols, got:\n%s", symbols)
+	}
+
+	// Verify PRG ROM: Bank 1 offset is 1 * 8192 = 8192 ($2000)
+	if !strings.Contains(symbols, "P:2000:main\n") {
+		t.Errorf("expected P:2000:main in symbols, got:\n%s", symbols)
+	}
+}
+
+func TestLinkFilesWithOptionsDebug(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := `
+.export main, PPU_MASK
+PPU_MASK = $2001
+
+.zp
+pos_y: .res 1
+
+.bank 0
+.code
+main:
+    LDA #$01
+    STA pos_y
+    RTS
+`
+	objFile, err := asm.Assemble("test.s", src)
+	if err != nil {
+		t.Fatalf("failed to assemble: %v", err)
+	}
+	moPath := filepath.Join(tmpDir, "test.mo")
+	if err := objFile.WriteFile(moPath); err != nil {
+		t.Fatalf("failed to write object file: %v", err)
+	}
+
+	nesPath := filepath.Join(tmpDir, "test.nes")
+	mlbPath := filepath.Join(tmpDir, "test.mlb")
+
+	if err := LinkFilesWithOptions([]string{moPath}, nesPath, LinkOptions{Debug: true}); err != nil {
+		t.Fatalf("LinkFilesWithOptions failed: %v", err)
+	}
+
+	// Verify .nes exists
+	if stat, err := os.Stat(nesPath); err != nil || stat.Size() != TotalOutputSize {
+		t.Fatalf("invalid NES ROM file: %v", err)
+	}
+
+	// Verify .mlb exists and contains expected symbols
+	mlbBytes, err := os.ReadFile(mlbPath)
+	if err != nil {
+		t.Fatalf("failed to read generated .mlb file: %v", err)
+	}
+	mlbContent := string(mlbBytes)
+	if !strings.Contains(mlbContent, "G:2001:PPU_MASK\n") {
+		t.Errorf("expected G:2001:PPU_MASK in .mlb, got:\n%s", mlbContent)
+	}
+	if !strings.Contains(mlbContent, "R:0:pos_y\n") {
+		t.Errorf("expected R:0:pos_y in .mlb, got:\n%s", mlbContent)
+	}
+	if !strings.Contains(mlbContent, "P:0:main\n") {
+		t.Errorf("expected P:0:main in .mlb, got:\n%s", mlbContent)
+	}
+}
+
+func TestBank62And63RelocationAndLimits(t *testing.T) {
+	src := `
+.export main, bank62_sym, bank63_sym
+.bank 62
+.code
+bank62_sym:
+    LDA #$42
+    RTS
+
+.bank 63
+.code
+bank63_sym:
+    LDA #$63
+    RTS
+
+main:
+    JSR bank62_sym
+    JSR bank63_sym
+    RTS
+`
+	objFile, err := asm.Assemble("fixed_banks.s", src)
+	if err != nil {
+		t.Fatalf("assembly failed: %v", err)
+	}
+
+	l := NewLinker(objFile)
+	_, err = l.Link()
+	if err != nil {
+		t.Fatalf("linking failed: %v", err)
+	}
+
+	// Verify bank 62 symbol address: $C000
+	b62Sym := l.globalSyms["bank62_sym"]
+	if b62Sym == nil || b62Sym.Address != 0xC000 {
+		t.Fatalf("expected bank62_sym address $C000, got %+v", b62Sym)
+	}
+
+	// Verify bank 63 symbol address: $E000
+	b63Sym := l.globalSyms["bank63_sym"]
+	if b63Sym == nil || b63Sym.Address != 0xE000 {
+		t.Fatalf("expected bank63_sym address $E000, got %+v", b63Sym)
+	}
+
+	// Test Bank 63 overflow (capacity is 8186 bytes ($1FFA) leaving room for vectors at $FFFA-$FFFF)
+	overflowSrc63 := `
+.export reset_handler
+.bank 63
+.code
+reset_handler:
+    .res 8187, $EA
+`
+	objFile63, err := asm.Assemble("overflow63.s", overflowSrc63)
+	if err != nil {
+		t.Fatalf("assembly failed: %v", err)
+	}
+	l63 := NewLinker(objFile63)
+	_, err = l63.Link()
+	if err == nil {
+		t.Fatalf("expected bank 63 overflow error for 8187 bytes, got nil")
+	}
+	if !strings.Contains(err.Error(), "overflow") {
+		t.Errorf("expected overflow error message, got: %v", err)
+	}
+
+	// Test Bank 63 exact max capacity (8186 bytes = 0x1FFA)
+	exactSrc63 := `
+.export reset_handler
+.bank 63
+.code
+reset_handler:
+    .res 8186, $EA
+`
+	objFileExact63, err := asm.Assemble("exact63.s", exactSrc63)
+	if err != nil {
+		t.Fatalf("assembly failed: %v", err)
+	}
+	lExact63 := NewLinker(objFileExact63)
+	_, err = lExact63.Link()
+	if err != nil {
+		t.Fatalf("expected 8186 bytes in bank 63 to succeed, got error: %v", err)
+	}
+
+	// Test Bank 62 overflow (capacity is 8192 bytes ($2000))
+	overflowSrc62 := `
+.export main
+.bank 62
+.code
+big_data:
+    .res 8193, $EA
+
+.bank 63
+main:
+    RTS
+`
+	objFile62, err := asm.Assemble("overflow62.s", overflowSrc62)
+	if err != nil {
+		t.Fatalf("assembly failed: %v", err)
+	}
+	l62 := NewLinker(objFile62)
+	_, err = l62.Link()
+	if err == nil {
+		t.Fatalf("expected bank 62 overflow error for 8193 bytes, got nil")
+	}
+	if !strings.Contains(err.Error(), "overflow") {
+		t.Errorf("expected overflow error message, got: %v", err)
+	}
+}

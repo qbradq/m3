@@ -242,4 +242,124 @@ func main() bank 0 {
 	}
 }
 
+func TestHandleBuildDebugFlag(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcFile := filepath.Join(tmpDir, "game.m3")
+	src := `
+package main
+
+define (
+    PPU_CTRL $2000
+)
+
+var player_x uint8 zp
+
+func main() bank 0 {
+    player_x = 5
+}
+`
+	if err := os.WriteFile(srcFile, []byte(src), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	// 1. Default output with -g
+	if err := handleBuild([]string{srcFile, "-g"}); err != nil {
+		t.Fatalf("handleBuild with -g failed: %v", err)
+	}
+
+	defaultNES := filepath.Join(tmpDir, "game.nes")
+	defaultMLB := filepath.Join(tmpDir, "game.mlb")
+
+	if _, err := os.Stat(defaultNES); err != nil {
+		t.Fatalf("expected %s to be created: %v", defaultNES, err)
+	}
+	mlbBytes, err := os.ReadFile(defaultMLB)
+	if err != nil {
+		t.Fatalf("expected %s to be created: %v", defaultMLB, err)
+	}
+	mlbContent := string(mlbBytes)
+	if !strings.Contains(mlbContent, "G:2000:_main_PPU_CTRL\n") {
+		t.Errorf("expected G:2000:_main_PPU_CTRL in %s", defaultMLB)
+	}
+	if !strings.Contains(mlbContent, "R:0:_main_player_x\n") {
+		t.Errorf("expected R:0:_main_player_x in %s", defaultMLB)
+	}
+	if !strings.Contains(mlbContent, "P:0:_main_main\n") {
+		t.Errorf("expected P:0:_main_main in %s", defaultMLB)
+	}
+
+	// 2. Custom output with --debug
+	customNES := filepath.Join(tmpDir, "custom.nes")
+	customMLB := filepath.Join(tmpDir, "custom.mlb")
+	if err := handleBuild([]string{"--debug", srcFile, "-o", customNES}); err != nil {
+		t.Fatalf("handleBuild with --debug and -o failed: %v", err)
+	}
+	if _, err := os.Stat(customNES); err != nil {
+		t.Fatalf("expected %s to be created: %v", customNES, err)
+	}
+	if _, err := os.Stat(customMLB); err != nil {
+		t.Fatalf("expected %s to be created: %v", customMLB, err)
+	}
+
+	// 3. -g followed by -g0 disables debug symbol generation
+	noDbgNES := filepath.Join(tmpDir, "nodbg.nes")
+	noDbgMLB := filepath.Join(tmpDir, "nodbg.mlb")
+	if err := handleBuild([]string{srcFile, "-o", noDbgNES, "-g", "-g0"}); err != nil {
+		t.Fatalf("handleBuild with -g -g0 failed: %v", err)
+	}
+	if _, err := os.Stat(noDbgNES); err != nil {
+		t.Fatalf("expected %s to be created: %v", noDbgNES, err)
+	}
+	if _, err := os.Stat(noDbgMLB); !os.IsNotExist(err) {
+		t.Errorf("expected %s NOT to be created when -g0 is passed", noDbgMLB)
+	}
+}
+
+func TestHandleLinkDebugFlag(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := `
+.export main, player_y
+.zp
+player_y: .res 1
+.bank 0
+.code
+main:
+    LDA #$02
+    STA player_y
+    RTS
+`
+	asmFile := filepath.Join(tmpDir, "linktest.s")
+	moFile := filepath.Join(tmpDir, "linktest.mo")
+	nesFile := filepath.Join(tmpDir, "linktest.nes")
+	mlbFile := filepath.Join(tmpDir, "linktest.mlb")
+
+	if err := os.WriteFile(asmFile, []byte(src), 0644); err != nil {
+		t.Fatalf("failed to write asm file: %v", err)
+	}
+
+	if err := handleAssemble([]string{asmFile, moFile}); err != nil {
+		t.Fatalf("handleAssemble failed: %v", err)
+	}
+
+	if err := handleLink([]string{moFile, "-o", nesFile, "-g"}); err != nil {
+		t.Fatalf("handleLink with -g failed: %v", err)
+	}
+
+	if _, err := os.Stat(nesFile); err != nil {
+		t.Fatalf("expected %s to be created", nesFile)
+	}
+	mlbBytes, err := os.ReadFile(mlbFile)
+	if err != nil {
+		t.Fatalf("expected %s to be created: %v", mlbFile, err)
+	}
+	mlbContent := string(mlbBytes)
+	if !strings.Contains(mlbContent, "R:0:player_y\n") {
+		t.Errorf("expected R:0:player_y in %s, got:\n%s", mlbFile, mlbContent)
+	}
+	if !strings.Contains(mlbContent, "P:0:main\n") {
+		t.Errorf("expected P:0:main in %s, got:\n%s", mlbFile, mlbContent)
+	}
+}
+
+
 

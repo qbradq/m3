@@ -172,24 +172,28 @@ func AccumulateSourceFiles(entryFiles []string) ([]*SourceUnit, error) {
 	return units, nil
 }
 
-// Build compiles one or more .m3 source files by recursively accumulating imported .m3 files,
-// compiling all of them into object files in memory, and linking all object files into the final NES ROM bytes.
-func Build(entryFiles []string) ([]byte, error) {
+// BuildOptions provides configuration options for BuildWithOptions and BuildFilesWithOptions.
+type BuildOptions struct {
+	Debug bool // When true, generates Mesen-compatible .mlb debug symbols.
+}
+
+// BuildWithOptions compiles entryFiles and resolves imports, links in memory, and returns ROM bytes and Mesen debug symbols.
+func BuildWithOptions(entryFiles []string, opts BuildOptions) ([]byte, string, error) {
 	units, err := AccumulateSourceFiles(entryFiles)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	var objects []*obj.ObjectFile
 	for _, unit := range units {
 		_, asmCode, err := Compile(unit.Path, unit.Content)
 		if err != nil {
-			return nil, fmt.Errorf("compilation failed for %q: %w", unit.Path, err)
+			return nil, "", fmt.Errorf("compilation failed for %q: %w", unit.Path, err)
 		}
 
 		objFile, err := asm.Assemble(unit.Path, asmCode)
 		if err != nil {
-			return nil, fmt.Errorf("assembly failed for %q:\n%s\nerror: %w", unit.Path, asmCode, err)
+			return nil, "", fmt.Errorf("assembly failed for %q:\n%s\nerror: %w", unit.Path, asmCode, err)
 		}
 
 		objects = append(objects, objFile)
@@ -198,15 +202,27 @@ func Build(entryFiles []string) ([]byte, error) {
 	linkerInst := linker.NewLinker(objects...)
 	romData, err := linkerInst.Link()
 	if err != nil {
-		return nil, fmt.Errorf("linking failed: %w", err)
+		return nil, "", fmt.Errorf("linking failed: %w", err)
 	}
 
-	return romData, nil
+	var symbols string
+	if opts.Debug {
+		symbols = linkerInst.GenerateMesenSymbols()
+	}
+
+	return romData, symbols, nil
 }
 
-// BuildFiles compiles the given input .m3 files and writes the linked NES ROM to outputFile.
-func BuildFiles(inputFiles []string, outputFile string) error {
-	romData, err := Build(inputFiles)
+// Build compiles one or more .m3 source files by recursively accumulating imported .m3 files,
+// compiling all of them into object files in memory, and linking all object files into the final NES ROM bytes.
+func Build(entryFiles []string) ([]byte, error) {
+	romData, _, err := BuildWithOptions(entryFiles, BuildOptions{})
+	return romData, err
+}
+
+// BuildFilesWithOptions compiles inputFiles, writes the linked NES ROM to outputFile, and optionally writes debug symbols to <outputFile_base>.mlb.
+func BuildFilesWithOptions(inputFiles []string, outputFile string, opts BuildOptions) error {
+	romData, symbols, err := BuildWithOptions(inputFiles, opts)
 	if err != nil {
 		return err
 	}
@@ -215,7 +231,19 @@ func BuildFiles(inputFiles []string, outputFile string) error {
 		return fmt.Errorf("failed to write NES ROM %q: %w", outputFile, err)
 	}
 
+	if opts.Debug {
+		debugPath := strings.TrimSuffix(outputFile, filepath.Ext(outputFile)) + ".mlb"
+		if err := os.WriteFile(debugPath, []byte(symbols), 0644); err != nil {
+			return fmt.Errorf("failed to write debug symbol file %q: %w", debugPath, err)
+		}
+	}
+
 	return nil
+}
+
+// BuildFiles compiles the given input .m3 files and writes the linked NES ROM to outputFile.
+func BuildFiles(inputFiles []string, outputFile string) error {
+	return BuildFilesWithOptions(inputFiles, outputFile, BuildOptions{})
 }
 
 // Compile parses an m3 source string into an AST, resolves imports, and generates the assembly output.
@@ -383,20 +411,12 @@ func generateAssembly(file *SourceFile) (string, error) {
 	if len(dataDecls) > 0 {
 		sb.WriteString("; Banked Data (Relocated to $8000-$9FFF)\n")
 		for _, d := range dataDecls {
-			if d.Bank != nil {
-				if d.Bank.IsAuto {
-					sb.WriteString(".bank auto\n")
-				} else if num, ok := d.Bank.Value.(*NumberLit); ok {
-					sb.WriteString(fmt.Sprintf(".bank %d\n", num.Value))
-				}
-			} else {
-				sb.WriteString(".bank auto\n")
-			}
-			sb.WriteString(".data\n")
 			pkg := d.Package
 			if pkg == "" {
 				pkg = file.PackageName
 			}
+			emitBank(&sb, d.Bank, pkg)
+			sb.WriteString(".data\n")
 			name := mangleSymbol(pkg, d.Name)
 			if isExported(d.Name) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
@@ -437,20 +457,12 @@ func generateAssembly(file *SourceFile) (string, error) {
 	if len(constDecls) > 0 {
 		sb.WriteString("; Constants and ROM Data\n")
 		for _, c := range constDecls {
-			if c.Bank != nil {
-				if c.Bank.IsAuto {
-					sb.WriteString(".bank auto\n")
-				} else if num, ok := c.Bank.Value.(*NumberLit); ok {
-					sb.WriteString(fmt.Sprintf(".bank %d\n", num.Value))
-				}
-			} else {
-				sb.WriteString(".bank auto\n")
-			}
-			sb.WriteString(".code\n")
 			pkg := c.Package
 			if pkg == "" {
 				pkg = file.PackageName
 			}
+			emitBank(&sb, c.Bank, pkg)
+			sb.WriteString(".code\n")
 			name := mangleSymbol(pkg, c.Name)
 			if isExported(c.Name) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
@@ -493,21 +505,12 @@ func generateAssembly(file *SourceFile) (string, error) {
 		cg := newCodeGenerator(file, structMap, localVars)
 
 		for _, f := range funcDecls {
-			if f.Bank != nil {
-				if f.Bank.IsAuto {
-					sb.WriteString(".bank auto\n")
-				} else if num, ok := f.Bank.Value.(*NumberLit); ok {
-					sb.WriteString(fmt.Sprintf(".bank %d\n", num.Value))
-				}
-			} else {
-				sb.WriteString(".bank auto\n")
-			}
-			sb.WriteString(".code\n")
-
 			pkg := f.Package
 			if pkg == "" {
 				pkg = file.PackageName
 			}
+			emitBank(&sb, f.Bank, pkg)
+			sb.WriteString(".code\n")
 			name := mangleSymbol(pkg, f.Name)
 			if isExported(f.Name) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
@@ -1483,6 +1486,24 @@ func formatConstExpr(expr Expr, defaultPkg string) string {
 		return fmt.Sprintf("incpal(%q)", e.Path)
 	default:
 		return "0"
+	}
+}
+
+func emitBank(sb *strings.Builder, b *BankSpec, pkg string) {
+	if b != nil {
+		if b.IsAuto {
+			sb.WriteString(".bank auto\n")
+		} else if b.Value != nil {
+			if num, ok := b.Value.(*NumberLit); ok {
+				sb.WriteString(fmt.Sprintf(".bank %d\n", num.Value))
+			} else {
+				sb.WriteString(fmt.Sprintf(".bank %s\n", formatConstExpr(b.Value, pkg)))
+			}
+		} else {
+			sb.WriteString(".bank auto\n")
+		}
+	} else {
+		sb.WriteString(".bank auto\n")
 	}
 }
 

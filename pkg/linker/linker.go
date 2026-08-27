@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/qbradq/m3/pkg/asm"
@@ -35,9 +36,10 @@ const (
 	WRAMMaxSize  = 0x2000 // 8192 bytes ($6000 - $7FFF)
 
 	// Vector offsets within Bank 63 ($E000-$FFFF)
-	NMIVectorOffset   = 0x1FFA // $FFFA
+	NMIVectorOffset   = 0x1FFA // $FFFA (Bank 63 code/data range is $E000-$FFF9, max 8186 bytes)
 	ResetVectorOffset = 0x1FFC // $FFFC
 	IRQVectorOffset   = 0x1FFE // $FFFE
+	Bank63MaxCodeSize = NMIVectorOffset // 0x1FFA = 8186 bytes
 )
 
 // Config represents optional linker settings.
@@ -90,6 +92,7 @@ type Linker struct {
 	fileAutoBank map[int]uint32
 	globalSyms   map[string]*resolvedSymbol
 	localSyms    map[symbolKey]*resolvedSymbol
+	allSyms      []*resolvedSymbol
 	usingMrt0    bool
 }
 
@@ -136,10 +139,14 @@ func (l *Linker) Link() ([]byte, error) {
 			bIdx := chunk.BankIndex
 			startOffset := bankUsage[bIdx]
 			chunkLen := uint32(len(chunk.Data))
+			maxCapacity := uint32(BankSize)
+			if bIdx == NumBanks-1 {
+				maxCapacity = uint32(Bank63MaxCodeSize)
+			}
 
-			if startOffset+chunkLen > BankSize {
+			if startOffset+chunkLen > maxCapacity {
 				return nil, fmt.Errorf("linker error: bank %d overflow in %s (size %d bytes exceeds bank limit of %d bytes)",
-					bIdx, objFile.SourceFile, startOffset+chunkLen, BankSize)
+					bIdx, objFile.SourceFile, startOffset+chunkLen, maxCapacity)
 			}
 
 			// Copy chunk data
@@ -170,7 +177,11 @@ func (l *Linker) Link() ([]byte, error) {
 
 			var assignedBank uint32 = NumBanks
 			for b := uint32(0); b < NumBanks; b++ {
-				if bankUsage[b]+chunkLen <= BankSize {
+				maxCapacity := uint32(BankSize)
+				if b == NumBanks-1 {
+					maxCapacity = uint32(Bank63MaxCodeSize)
+				}
+				if bankUsage[b]+chunkLen <= maxCapacity {
 					assignedBank = b
 					break
 				}
@@ -359,6 +370,15 @@ func (l *Linker) collectSymbols() error {
 				SourceFile:   objFile.SourceFile,
 			}
 
+			if resolvedSymBank == NumBanks-1 && addr > 0xFFF9 {
+				return fmt.Errorf("linker error: symbol %q address $%04X in bank 63 exceeds range $E000-$FFF9 (overflow into interrupt vectors)",
+					sym.Name, addr)
+			}
+			if resolvedSymBank == NumBanks-2 && (addr < Bank62BaseAddr || addr > 0xDFFF) {
+				return fmt.Errorf("linker error: symbol %q address $%04X in bank 62 exceeds range $C000-$DFFF",
+					sym.Name, addr)
+			}
+
 			if sym.Scope == obj.ScopeExport || sym.Scope == obj.ScopeGlobal {
 				if existing, exists := l.globalSyms[sym.Name]; exists {
 					return fmt.Errorf("linker error: duplicate symbol %q defined in %s and %s",
@@ -369,6 +389,7 @@ func (l *Linker) collectSymbols() error {
 
 			// Also store in local symbols keyed by file
 			l.localSyms[symbolKey{fileIdx: fileIdx, name: sym.Name}] = resolved
+			l.allSyms = append(l.allSyms, resolved)
 		}
 	}
 
@@ -696,8 +717,103 @@ func (l *Linker) buildINESImage() []byte {
 	return out
 }
 
-// LinkFiles is a helper to read multiple .mo files, link them, and write the .nes output file.
-func LinkFiles(inputPaths []string, outputPath string) error {
+// mesenEntry represents a single Mesen label record.
+type mesenEntry struct {
+	memType string
+	offset  int64
+	name    string
+}
+
+// GenerateMesenSymbols generates the contents of a Mesen-compatible .mlb file from resolved symbols.
+func (l *Linker) GenerateMesenSymbols() string {
+	var entries []mesenEntry
+	seen := make(map[string]bool)
+
+	addEntry := func(memType string, offset int64, name string) {
+		if strings.HasPrefix(name, "__seg_") {
+			return
+		}
+		key := fmt.Sprintf("%s:%X:%s", memType, offset, name)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		entries = append(entries, mesenEntry{
+			memType: memType,
+			offset:  offset,
+			name:    name,
+		})
+	}
+
+	for _, sym := range l.allSyms {
+		switch {
+		case sym.Bank >= 0:
+			prgRomOffset := int64(sym.Bank)*BankSize + int64(sym.OffsetInBank)
+			addEntry("P", prgRomOffset, sym.Name)
+		case sym.Bank == obj.BankZP || sym.Bank == obj.BankRAM:
+			addEntry("R", sym.Address, sym.Name)
+		case sym.Bank == obj.BankWRAM:
+			addEntry("S", int64(sym.OffsetInBank), sym.Name)
+		case sym.Bank == obj.BankConst:
+			addEntry("G", sym.Address, sym.Name)
+		}
+	}
+
+	for aliasName, sym := range l.globalSyms {
+		switch {
+		case sym.Bank >= 0:
+			prgRomOffset := int64(sym.Bank)*BankSize + int64(sym.OffsetInBank)
+			addEntry("P", prgRomOffset, aliasName)
+		case sym.Bank == obj.BankZP || sym.Bank == obj.BankRAM:
+			addEntry("R", sym.Address, aliasName)
+		case sym.Bank == obj.BankWRAM:
+			addEntry("S", int64(sym.OffsetInBank), aliasName)
+		case sym.Bank == obj.BankConst:
+			addEntry("G", sym.Address, aliasName)
+		}
+	}
+
+	if len(entries) == 0 {
+		return ""
+	}
+
+	typeOrder := map[string]int{
+		"G": 0,
+		"R": 1,
+		"S": 2,
+		"P": 3,
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		orderI := typeOrder[entries[i].memType]
+		orderJ := typeOrder[entries[j].memType]
+		if orderI != orderJ {
+			return orderI < orderJ
+		}
+		if entries[i].offset != entries[j].offset {
+			return entries[i].offset < entries[j].offset
+		}
+		return entries[i].name < entries[j].name
+	})
+
+	var sb strings.Builder
+	for _, e := range entries {
+		sb.WriteString(fmt.Sprintf("%s:%X:%s\n", e.memType, e.offset, e.name))
+	}
+	return sb.String()
+}
+
+// LinkOptions provides configuration options for LinkFilesWithOptions.
+type LinkOptions struct {
+	PRGBankCount int
+	Mapper       uint8
+	Mirroring    uint8
+	HasBattery   bool
+	Debug        bool // When true, generates a Mesen .mlb debug symbol file alongside the ROM.
+}
+
+// LinkFilesWithOptions reads multiple .mo files, links them, writes the .nes output, and optionally creates a .mlb debug symbol file.
+func LinkFilesWithOptions(inputPaths []string, outputPath string, opts LinkOptions) error {
 	if len(inputPaths) == 0 {
 		return fmt.Errorf("no input files provided")
 	}
@@ -712,6 +828,17 @@ func LinkFiles(inputPaths []string, outputPath string) error {
 	}
 
 	linker := NewLinker(objects...)
+	if opts.PRGBankCount > 0 {
+		linker.config.PRGBankCount = opts.PRGBankCount
+	}
+	if opts.Mapper > 0 {
+		linker.config.Mapper = opts.Mapper
+	}
+	linker.config.Mirroring = opts.Mirroring
+	if opts.HasBattery {
+		linker.config.HasBattery = opts.HasBattery
+	}
+
 	romData, err := linker.Link()
 	if err != nil {
 		return err
@@ -730,5 +857,18 @@ func LinkFiles(inputPaths []string, outputPath string) error {
 		return fmt.Errorf("failed to write NES ROM %q: %w", outputPath, err)
 	}
 
+	if opts.Debug {
+		debugPath := strings.TrimSuffix(outputPath, filepath.Ext(outputPath)) + ".mlb"
+		symbolsContent := linker.GenerateMesenSymbols()
+		if err := os.WriteFile(debugPath, []byte(symbolsContent), 0644); err != nil {
+			return fmt.Errorf("failed to write debug symbol file %q: %w", debugPath, err)
+		}
+	}
+
 	return nil
+}
+
+// LinkFiles is a helper to read multiple .mo files, link them, and write the .nes output file.
+func LinkFiles(inputPaths []string, outputPath string) error {
+	return LinkFilesWithOptions(inputPaths, outputPath, LinkOptions{})
 }

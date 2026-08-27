@@ -566,6 +566,95 @@ data (
 	}
 }
 
+func TestParseTopLevelBankStatement(t *testing.T) {
+	src := `
+package testlib
 
+bank 63
 
+func FuncIn63() {
+}
 
+func FuncIn2() bank 2 {
+}
+
+const TableIn63 uint8[2] = [2]uint8{1, 2}
+
+bank 1
+
+func FuncIn1() {
+}
+
+data DataIn1 = incbin("tiles.bin")
+
+bank auto
+
+func FuncInAuto() {
+}
+`
+	lexer := NewLexer("testlib.m3", src)
+	parser := NewParser(lexer)
+	file, err := parser.ParseSourceFile()
+	if err != nil {
+		t.Fatalf("ParseSourceFile failed: %v", err)
+	}
+
+	// Decls:
+	// 0: BankDecl(63)
+	// 1: FuncDecl(FuncIn63) -> Bank 63
+	// 2: FuncDecl(FuncIn2) -> Bank 2
+	// 3: ConstDecl(TableIn63) -> Bank 63
+	// 4: BankDecl(1)
+	// 5: FuncDecl(FuncIn1) -> Bank 1
+	// 6: DataDecl(DataIn1) -> Bank 1
+	// 7: BankDecl(auto)
+	// 8: FuncDecl(FuncInAuto) -> Bank auto
+	if len(file.Decls) != 9 {
+		t.Fatalf("expected 9 decls, got %d", len(file.Decls))
+	}
+
+	b0, ok := file.Decls[0].(*BankDecl)
+	if !ok || b0.Bank == nil || b0.Bank.Value.(*NumberLit).Value != 63 {
+		t.Errorf("expected BankDecl 63, got %+v", file.Decls[0])
+	}
+
+	f1, ok := file.Decls[1].(*FuncDecl)
+	if !ok || f1.Bank == nil || f1.Bank.Value.(*NumberLit).Value != 63 {
+		t.Errorf("expected FuncIn63 to have Bank 63, got %+v", f1.Bank)
+	}
+
+	f2, ok := file.Decls[2].(*FuncDecl)
+	if !ok || f2.Bank == nil || f2.Bank.Value.(*NumberLit).Value != 2 {
+		t.Errorf("expected FuncIn2 to have Bank 2, got %+v", f2.Bank)
+	}
+
+	c3, ok := file.Decls[3].(*ConstDecl)
+	if !ok || c3.Bank == nil || c3.Bank.Value.(*NumberLit).Value != 63 {
+		t.Errorf("expected TableIn63 to have Bank 63, got %+v", c3.Bank)
+	}
+
+	b4, ok := file.Decls[4].(*BankDecl)
+	if !ok || b4.Bank == nil || b4.Bank.Value.(*NumberLit).Value != 1 {
+		t.Errorf("expected BankDecl 1, got %+v", file.Decls[4])
+	}
+
+	f5, ok := file.Decls[5].(*FuncDecl)
+	if !ok || f5.Bank == nil || f5.Bank.Value.(*NumberLit).Value != 1 {
+		t.Errorf("expected FuncIn1 to have Bank 1, got %+v", f5.Bank)
+	}
+
+	d6, ok := file.Decls[6].(*DataDecl)
+	if !ok || d6.Bank == nil || d6.Bank.Value.(*NumberLit).Value != 1 {
+		t.Errorf("expected DataIn1 to have Bank 1, got %+v", d6.Bank)
+	}
+
+	b7, ok := file.Decls[7].(*BankDecl)
+	if !ok || b7.Bank == nil || !b7.Bank.IsAuto {
+		t.Errorf("expected BankDecl auto, got %+v", file.Decls[7])
+	}
+
+	f8, ok := file.Decls[8].(*FuncDecl)
+	if !ok || f8.Bank == nil || !f8.Bank.IsAuto {
+		t.Errorf("expected FuncInAuto to have Bank auto, got %+v", f8.Bank)
+	}
+}

@@ -106,7 +106,29 @@ To facilitate clean interoperability with assembly routines and avoid collisions
 */
 ```
 
-### 2.7 Literals
+### 2.7 The `bank` Top-Level Statement
+The `bank <n>` statement sets the default PRG-ROM bank for all subsequent symbols (functions, constants, and banked data) declared in the file unless an explicit `bank` specifier is attached to a declaration:
+
+```go
+package ppu
+
+bank 63 // All subsequent symbols default to Bank 63
+
+func Disable() {
+    // Placed in Bank 63
+}
+
+func SpecialHelper() bank 2 {
+    // Explicitly overrides default: placed in Bank 2
+}
+
+bank 0 // Switch default bank for following symbols to Bank 0
+```
+
+- When `bank <n>` is omitted, symbols default to `bank auto`.
+- The top-level `bank` statement may be specified multiple times within a single source file to change the default bank for subsequent declarations.
+
+### 2.8 Literals
 - **Decimal**: `0`, `42`, `255`, `65535`
 - **Hexadecimal**: `$FF`, `$8000` or `0xFF`, `0x8000`
 - **Binary**: `%11001010` or `0b11001010`

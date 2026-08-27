@@ -141,6 +141,15 @@ type ImportDecl struct {
 func (i *ImportDecl) Pos() Position { return i.pos }
 func (i *ImportDecl) declNode()     {}
 
+// BankDecl represents a top-level default bank statement: bank <n> / bank auto
+type BankDecl struct {
+	Bank *BankSpec
+	pos  Position
+}
+
+func (b *BankDecl) Pos() Position { return b.pos }
+func (b *BankDecl) declNode()     {}
+
 // VarDecl represents a variable declaration: var name type[len] storage [= init]
 type VarDecl struct {
 	Package string

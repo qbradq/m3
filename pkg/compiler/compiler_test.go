@@ -741,8 +741,140 @@ func update() {
 	}
 }
 
+func TestBuildWithOptionsDebug(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := `
+package main
 
+define (
+    PPU_CTRL $2000
+)
 
+var (
+    player_x uint8 zp
+    score    uint16 ram
+)
 
+func main() bank 0 {
+    player_x = 10
+}
+`
+	mainPath := filepath.Join(tmpDir, "main.m3")
+	if err := os.WriteFile(mainPath, []byte(src), 0644); err != nil {
+		t.Fatalf("failed to write main.m3: %v", err)
+	}
 
+	rom, symbols, err := BuildWithOptions([]string{mainPath}, BuildOptions{Debug: true})
+	if err != nil {
+		t.Fatalf("BuildWithOptions failed: %v", err)
+	}
+	if len(rom) != 16+64*8192 {
+		t.Fatalf("unexpected ROM size: %d", len(rom))
+	}
+	if symbols == "" {
+		t.Fatalf("expected non-empty symbols output")
+	}
 
+	if !strings.Contains(symbols, "G:2000:_main_PPU_CTRL\n") {
+		t.Errorf("expected G:2000:_main_PPU_CTRL in symbols, got:\n%s", symbols)
+	}
+	if !strings.Contains(symbols, "R:0:_main_player_x\n") {
+		t.Errorf("expected R:0:_main_player_x in symbols, got:\n%s", symbols)
+	}
+	if !strings.Contains(symbols, "R:300:_main_score\n") {
+		t.Errorf("expected R:300:_main_score in symbols, got:\n%s", symbols)
+	}
+	if !strings.Contains(symbols, "P:0:_main_main\n") {
+		t.Errorf("expected P:0:_main_main in symbols, got:\n%s", symbols)
+	}
+}
+
+func TestBuildFilesWithOptionsDebug(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := `
+package main
+
+var lives uint8 zp
+
+func main() bank 0 {
+    lives = 3
+}
+`
+	mainPath := filepath.Join(tmpDir, "game.m3")
+	if err := os.WriteFile(mainPath, []byte(src), 0644); err != nil {
+		t.Fatalf("failed to write game.m3: %v", err)
+	}
+
+	outNES := filepath.Join(tmpDir, "game.nes")
+	outMLB := filepath.Join(tmpDir, "game.mlb")
+
+	if err := BuildFilesWithOptions([]string{mainPath}, outNES, BuildOptions{Debug: true}); err != nil {
+		t.Fatalf("BuildFilesWithOptions failed: %v", err)
+	}
+
+	if stat, err := os.Stat(outNES); err != nil || stat.Size() != 16+64*8192 {
+		t.Fatalf("invalid NES ROM output: %v", err)
+	}
+
+	mlbBytes, err := os.ReadFile(outMLB)
+	if err != nil {
+		t.Fatalf("failed to read generated .mlb: %v", err)
+	}
+	mlbStr := string(mlbBytes)
+	if !strings.Contains(mlbStr, "R:0:_main_lives\n") {
+		t.Errorf("expected R:0:_main_lives in .mlb, got:\n%s", mlbStr)
+	}
+	if !strings.Contains(mlbStr, "P:0:_main_main\n") {
+		t.Errorf("expected P:0:_main_main in .mlb, got:\n%s", mlbStr)
+	}
+}
+
+func TestTopLevelBankEmission(t *testing.T) {
+	src := `
+package testpkg
+
+bank 63
+
+const TableA uint8[2] = [2]uint8{1, 2}
+
+data DataA = incbin("sample.bin")
+
+func FuncA() {
+}
+
+func FuncB() bank 2 {
+}
+
+bank 1
+
+const TableB uint8[2] = [2]uint8{3, 4}
+
+func FuncC() {
+}
+`
+	_, asmOutput, err := Compile("test.m3", src)
+	if err != nil {
+		t.Fatalf("Compile failed: %v", err)
+	}
+
+	expectedSnippets := []string{
+		// TableA in Bank 63
+		".bank 63\n.code\n.export _testpkg_TableA\n_testpkg_TableA:",
+		// DataA in Bank 63
+		".bank 63\n.data\n.export _testpkg_DataA\n_testpkg_DataA:",
+		// FuncA in Bank 63
+		".bank 63\n.code\n.export _testpkg_FuncA\n.proc _testpkg_FuncA",
+		// FuncB in Bank 2
+		".bank 2\n.code\n.export _testpkg_FuncB\n.proc _testpkg_FuncB",
+		// TableB in Bank 1
+		".bank 1\n.code\n.export _testpkg_TableB\n_testpkg_TableB:",
+		// FuncC in Bank 1
+		".bank 1\n.code\n.export _testpkg_FuncC\n.proc _testpkg_FuncC",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(asmOutput, snippet) {
+			t.Errorf("expected asm output to contain %q, got:\n%s", snippet, asmOutput)
+		}
+	}
+}

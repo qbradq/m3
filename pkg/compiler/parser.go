@@ -7,10 +7,11 @@ import (
 
 // Parser parses a stream of tokens into an AST.
 type Parser struct {
-	lexer     *Lexer
-	curToken  Token
-	peekToken Token
-	errors    []string
+	lexer       *Lexer
+	curToken    Token
+	peekToken   Token
+	errors      []string
+	defaultBank *BankSpec
 }
 
 // NewParser creates a new Parser for the lexer.
@@ -94,6 +95,13 @@ func (p *Parser) ParseSourceFile() (*SourceFile, error) {
 				return nil, err
 			}
 			file.Imports = append(file.Imports, imports...)
+
+		case TokenBank:
+			decl, err := p.parseBankDecl()
+			if err != nil {
+				return nil, err
+			}
+			file.Decls = append(file.Decls, decl)
 
 		case TokenVar:
 			decls, err := p.parseVarDecl()
@@ -382,6 +390,8 @@ func (p *Parser) parseSingleConstDecl() (*ConstDecl, error) {
 		if err != nil {
 			return nil, err
 		}
+	} else if p.defaultBank != nil {
+		bankSpec = p.defaultBank
 	}
 
 	if !p.expect(TokenEq) {
@@ -455,6 +465,8 @@ func (p *Parser) parseSingleDataDecl() (*DataDecl, error) {
 		if err != nil {
 			return nil, err
 		}
+	} else if p.defaultBank != nil {
+		bankSpec = p.defaultBank
 	}
 
 	if !p.expect(TokenEq) {
@@ -549,6 +561,18 @@ func (p *Parser) parseBankSpec() (*BankSpec, error) {
 		return nil, err
 	}
 	return &BankSpec{IsAuto: false, Value: val, pos: pos}, nil
+}
+
+func (p *Parser) parseBankDecl() (*BankDecl, error) {
+	bankSpec, err := p.parseBankSpec()
+	if err != nil {
+		return nil, err
+	}
+	p.defaultBank = bankSpec
+	return &BankDecl{
+		Bank: bankSpec,
+		pos:  bankSpec.Pos(),
+	}, nil
 }
 
 // ----------------------------------------------------------------------------
@@ -706,6 +730,8 @@ func (p *Parser) parseFuncDecl() (*FuncDecl, error) {
 		if err != nil {
 			return nil, err
 		}
+	} else if p.defaultBank != nil {
+		bankSpec = p.defaultBank
 	}
 
 	// Function body block: { ... }
