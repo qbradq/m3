@@ -664,6 +664,84 @@ func main() bank 0 {
 	}
 }
 
+func TestCompileStatements(t *testing.T) {
+	src := `
+package testgame
+
+type Player struct {
+    x  uint8
+    y  uint8
+    hp uint8
+}
+
+var (
+    players Player[4] ram
+    score   uint16    zp
+    lives   uint8     zp
+)
+
+func update() {
+    lives = 3
+    score += 100
+    lives--
+    score++
+
+    for i := uint8(0); i < 4; i++ {
+        if players[i].hp > 0 {
+            players[i].x += 2
+            players[i].y++
+        } else {
+            players[i].x = 0
+        }
+    }
+
+    switch lives {
+    case 0:
+        score = 0
+    case 1:
+        score = 10
+    default:
+        score = 100
+    }
+}
+`
+	_, asmOutput, err := Compile("testgame.m3", src)
+	if err != nil {
+		t.Fatalf("Compile failed: %v", err)
+	}
+
+	expectedSnippets := []string{
+		"_testgame_players_x:",
+		".res 4",
+		"_testgame_players_y:",
+		".res 4",
+		"_testgame_players_hp:",
+		".res 4",
+		"_testgame_update_i:",
+		".res 1",
+		".proc _testgame_update",
+		"LDA #3",
+		"STA _testgame_lives",
+		"INC _testgame_score",
+		"DEC _testgame_lives",
+		"STA _testgame_update_i",
+		"CMP #4",
+		"STA _testgame_players_x, X",
+		"INC _testgame_players_y, X",
+		"JMP @for_head_",
+		"CMP #0",
+		"BEQ @case_",
+		"RTS",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(asmOutput, snippet) {
+			t.Errorf("expected assembly to contain %q, got:\n%s", snippet, asmOutput)
+		}
+	}
+}
+
+
 
 
 
