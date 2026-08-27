@@ -333,7 +333,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
 			sb.WriteString(fmt.Sprintf("%s:\n", name))
-			sb.WriteString(fmt.Sprintf("  .res %d\n", typeSize(v.Type)))
+			sb.WriteString(fmt.Sprintf("  .res %d\n", varSize(v)))
 		}
 		sb.WriteString("\n")
 	}
@@ -347,7 +347,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
 			sb.WriteString(fmt.Sprintf("%s:\n", name))
-			sb.WriteString(fmt.Sprintf("  .res %d\n", typeSize(v.Type)))
+			sb.WriteString(fmt.Sprintf("  .res %d\n", varSize(v)))
 		}
 		sb.WriteString("\n")
 	}
@@ -361,7 +361,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
 			sb.WriteString(fmt.Sprintf("%s:\n", name))
-			sb.WriteString(fmt.Sprintf("  .res %d\n", typeSize(v.Type)))
+			sb.WriteString(fmt.Sprintf("  .res %d\n", varSize(v)))
 		}
 		sb.WriteString("\n")
 	}
@@ -400,6 +400,16 @@ func generateAssembly(file *SourceFile) (string, error) {
 				}
 			} else if numLit, ok := c.Value.(*NumberLit); ok {
 				sb.WriteString(fmt.Sprintf("  .word $%04X\n", numLit.Value))
+			} else if incbin, ok := c.Value.(*IncbinExpr); ok {
+				sb.WriteString(fmt.Sprintf("  .incbin %q\n", incbin.Path))
+			} else if incchr, ok := c.Value.(*IncchrExpr); ok {
+				sb.WriteString(fmt.Sprintf("  .incchr %q\n", incchr.Path))
+			} else if incpal, ok := c.Value.(*IncpalExpr); ok {
+				if incpal.Count != nil {
+					sb.WriteString(fmt.Sprintf("  .incpal %q, %s\n", incpal.Path, formatConstExpr(incpal.Count)))
+				} else {
+					sb.WriteString(fmt.Sprintf("  .incpal %q\n", incpal.Path))
+				}
 			}
 			sb.WriteString("\n")
 		}
@@ -539,8 +549,48 @@ func formatConstExpr(expr Expr) string {
 			return formatConstExpr(e.Args[0])
 		}
 		return "0"
+	case *IncbinExpr:
+		return fmt.Sprintf("incbin(%q)", e.Path)
+	case *IncchrExpr:
+		return fmt.Sprintf("incchr(%q)", e.Path)
+	case *IncpalExpr:
+		if e.Count != nil {
+			return fmt.Sprintf("incpal(%q, %s)", e.Path, formatConstExpr(e.Count))
+		}
+		return fmt.Sprintf("incpal(%q)", e.Path)
 	default:
 		return "0"
+	}
+}
+
+func varSize(v *VarDecl) int {
+	if v == nil {
+		return 1
+	}
+	if arr, ok := v.Type.(*ArrayType); ok && arr.Length == nil && v.Init != nil {
+		return exprSize(v.Init, typeSize(arr.Elem))
+	}
+	return typeSize(v.Type)
+}
+
+func exprSize(expr Expr, elemSize int) int {
+	if expr == nil {
+		return elemSize
+	}
+	switch e := expr.(type) {
+	case *IncpalExpr:
+		if e.Count != nil {
+			if num, ok := e.Count.(*NumberLit); ok && num.Value > 0 {
+				return int(num.Value)
+			}
+		}
+		return 4
+	case *ArrayLit:
+		return len(e.Elements) * elemSize
+	case *StringLit:
+		return len(e.Value)
+	default:
+		return elemSize
 	}
 }
 

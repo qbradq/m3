@@ -491,3 +491,32 @@ type MemberExpr struct {
 
 func (m *MemberExpr) Pos() Position { return m.pos }
 func (m *MemberExpr) exprNode()     {}
+
+// IncbinExpr represents incbin("path")
+type IncbinExpr struct {
+	Path string
+	pos  Position
+}
+
+func (i *IncbinExpr) Pos() Position { return i.pos }
+func (i *IncbinExpr) exprNode()     {}
+
+// IncchrExpr represents incchr("path")
+type IncchrExpr struct {
+	Path string
+	pos  Position
+}
+
+func (i *IncchrExpr) Pos() Position { return i.pos }
+func (i *IncchrExpr) exprNode()     {}
+
+// IncpalExpr represents incpal("path" [, count])
+type IncpalExpr struct {
+	Path  string
+	Count Expr // Optional (nil if omitted, defaults to 4)
+	pos   Position
+}
+
+func (i *IncpalExpr) Pos() Position { return i.pos }
+func (i *IncpalExpr) exprNode()     {}
+

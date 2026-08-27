@@ -183,6 +183,52 @@ Equivalent to the assembly bank selector \`^symbol\`.
 var b = bank(level_data)
 \`\`\``,
   },
+  incbin: {
+    name: 'incbin',
+    kind: CompletionItemKind.Function,
+    detail: 'incbin(rel_path: string) -> uint8[]',
+    documentation: `**incbin(rel_path)** includes raw binary data directly from the named file as a \`uint8[]\` byte sequence.
+
+Can be used in place of any \`uint8[]\` literal value. Path is resolved relative to the source file.
+
+### Example:
+\`\`\`go
+const level_data uint8[] = incbin("level1.bin")
+\`\`\``,
+    snippet: 'incbin("${1:file.bin}")',
+    insertTextFormat: InsertTextFormat.Snippet,
+  },
+  incchr: {
+    name: 'incchr',
+    kind: CompletionItemKind.Function,
+    detail: 'incchr(rel_path: string) -> uint8[]',
+    documentation: `**incchr(rel_path)** converts a PNG image directly into standard NES 2BPP planar CHR tile data (16 bytes per 8x8 pixel tile in row-major order).
+
+Image width and height must be multiples of 8 pixels. Can be used in place of any \`uint8[]\` literal value.
+
+### Example:
+\`\`\`go
+const font_chr uint8[] bank 1 = incchr("font.png")
+\`\`\``,
+    snippet: 'incchr("${1:font.png}")',
+    insertTextFormat: InsertTextFormat.Snippet,
+  },
+  incpal: {
+    name: 'incpal',
+    kind: CompletionItemKind.Function,
+    detail: 'incpal(rel_path: string [, count: uint8]) -> uint8[]',
+    documentation: `**incpal(rel_path [, n])** extracts palette colors from a PNG image and converts them to NES hardware 2C02 palette index bytes (\`$00\`–\`$3F\`).
+
+Optional count \`n\` specifies the number of palette bytes to emit (defaults to 4 for a single NES sub-palette, or up to 16 for a full palette). Can be used in place of any \`uint8[]\` literal value.
+
+### Example:
+\`\`\`go
+const font_pal uint8[16] = incpal("font.png", 16)
+var sub_pal uint8[4] = incpal("title.png")
+\`\`\``,
+    snippet: 'incpal("${1:font.png}", ${2:16})',
+    insertTextFormat: InsertTextFormat.Snippet,
+  },
 };
 
 export const M3_KEYWORDS: Record<string, DocEntry> = {

@@ -133,7 +133,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.m3",
-          "match": "\\b(low|high|bank)(?=\\s*\\()"
+          "match": "\\b(low|high|bank|incbin|incchr|incpal)(?=\\s*\\()"
         }
       ]
     },

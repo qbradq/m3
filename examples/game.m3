@@ -66,8 +66,8 @@ func main() {
     init_enemies()
 
     // Load RAM
-    memory.Copy(data.font_pal, &palette_buffer[0], 16)
-    memory.Copy(data.sprite_pal, &palette_buffer[16], 16)
+    memory.Copy(data.FontPal, &palette_buffer[0], 16)
+    memory.Copy(data.SpritePal, &palette_buffer[16], 16)
 
     // Initialize PPU
     ppu.Disable() 

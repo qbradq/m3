@@ -1229,6 +1229,27 @@ func (p *Parser) parsePrefixExpression() (Expr, error) {
 		p.nextToken()
 		return p.parsePostfix(ident)
 
+	case TokenIncbin:
+		expr, err := p.parseIncbinExpr()
+		if err != nil {
+			return nil, err
+		}
+		return p.parsePostfix(expr)
+
+	case TokenIncchr:
+		expr, err := p.parseIncchrExpr()
+		if err != nil {
+			return nil, err
+		}
+		return p.parsePostfix(expr)
+
+	case TokenIncpal:
+		expr, err := p.parseIncpalExpr()
+		if err != nil {
+			return nil, err
+		}
+		return p.parsePostfix(expr)
+
 	case TokenLParen:
 		p.nextToken() // consume '('
 		expr, err := p.parseExpression(0)
@@ -1361,3 +1382,80 @@ func (p *Parser) parseArrayLiteral() (*ArrayLit, error) {
 		pos:      pos,
 	}, nil
 }
+
+func (p *Parser) parseIncbinExpr() (*IncbinExpr, error) {
+	pos := p.curToken.Pos
+	p.nextToken() // consume 'incbin'
+
+	if !p.expect(TokenLParen) {
+		return nil, p.errorResult()
+	}
+
+	if !p.curTokenIs(TokenString) {
+		p.errorf("expected file path string literal in incbin expression, got %s (%q)", p.curToken.Type, p.curToken.Literal)
+		return nil, p.errorResult()
+	}
+	path := p.curToken.Literal
+	p.nextToken()
+
+	if !p.expect(TokenRParen) {
+		return nil, p.errorResult()
+	}
+
+	return &IncbinExpr{Path: path, pos: pos}, nil
+}
+
+func (p *Parser) parseIncchrExpr() (*IncchrExpr, error) {
+	pos := p.curToken.Pos
+	p.nextToken() // consume 'incchr'
+
+	if !p.expect(TokenLParen) {
+		return nil, p.errorResult()
+	}
+
+	if !p.curTokenIs(TokenString) {
+		p.errorf("expected PNG file path string literal in incchr expression, got %s (%q)", p.curToken.Type, p.curToken.Literal)
+		return nil, p.errorResult()
+	}
+	path := p.curToken.Literal
+	p.nextToken()
+
+	if !p.expect(TokenRParen) {
+		return nil, p.errorResult()
+	}
+
+	return &IncchrExpr{Path: path, pos: pos}, nil
+}
+
+func (p *Parser) parseIncpalExpr() (*IncpalExpr, error) {
+	pos := p.curToken.Pos
+	p.nextToken() // consume 'incpal'
+
+	if !p.expect(TokenLParen) {
+		return nil, p.errorResult()
+	}
+
+	if !p.curTokenIs(TokenString) {
+		p.errorf("expected PNG file path string literal in incpal expression, got %s (%q)", p.curToken.Type, p.curToken.Literal)
+		return nil, p.errorResult()
+	}
+	path := p.curToken.Literal
+	p.nextToken()
+
+	var count Expr
+	if p.curTokenIs(TokenComma) {
+		p.nextToken() // consume ','
+		var err error
+		count, err = p.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if !p.expect(TokenRParen) {
+		return nil, p.errorResult()
+	}
+
+	return &IncpalExpr{Path: path, Count: count, pos: pos}, nil
+}
+

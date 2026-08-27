@@ -16,10 +16,7 @@
     "Programming Languages"
   ],
   "main": "./dist/client/extension.js",
-  "activationEvents": [
-    "onLanguage:m3",
-    "onLanguage:m3-asm"
-  ],
+  "activationEvents": [],
   "contributes": {
     "languages": [
       {

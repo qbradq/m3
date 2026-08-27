@@ -427,4 +427,84 @@ func TestParsePointerAndGroupedParams(t *testing.T) {
 	}
 }
 
+func TestParseInclusionExpressions(t *testing.T) {
+	src := `
+package main
+
+const (
+    font_pal   uint8[16] = incpal("font.png", 16)
+    bg_pal     uint8[4]  = incpal("title.png")
+    font_chr   uint8[]   = incchr("font.png")
+    raw_bin    uint8[]   = incbin("data.bin")
+)
+
+var fontPal uint8[16] = incpal("font.png", 16)
+var subPal uint8[4] = incpal("title.png")
+var chrData uint8[] = incchr("tiles.png")
+var rawData uint8[] = incbin("level.bin")
+`
+
+	lexer := NewLexer("inclusion.m3", src)
+	parser := NewParser(lexer)
+	file, err := parser.ParseSourceFile()
+	if err != nil {
+		t.Fatalf("failed to parse inclusion expressions: %v", err)
+	}
+
+	if len(file.Decls) != 8 {
+		t.Fatalf("expected 8 decls, got %d", len(file.Decls))
+	}
+
+	// 1. font_pal
+	c1, ok := file.Decls[0].(*ConstDecl)
+	if !ok || c1.Name != "font_pal" {
+		t.Fatalf("expected ConstDecl font_pal, got %+v", file.Decls[0])
+	}
+	incpal1, ok := c1.Value.(*IncpalExpr)
+	if !ok || incpal1.Path != "font.png" || incpal1.Count == nil {
+		t.Fatalf("expected IncpalExpr with path font.png and count, got %+v", c1.Value)
+	}
+
+	// 2. bg_pal (no count)
+	c2, ok := file.Decls[1].(*ConstDecl)
+	if !ok || c2.Name != "bg_pal" {
+		t.Fatalf("expected ConstDecl bg_pal, got %+v", file.Decls[1])
+	}
+	incpal2, ok := c2.Value.(*IncpalExpr)
+	if !ok || incpal2.Path != "title.png" || incpal2.Count != nil {
+		t.Fatalf("expected IncpalExpr with path title.png and nil count, got %+v", c2.Value)
+	}
+
+	// 3. font_chr
+	c3, ok := file.Decls[2].(*ConstDecl)
+	if !ok || c3.Name != "font_chr" {
+		t.Fatalf("expected ConstDecl font_chr, got %+v", file.Decls[2])
+	}
+	incchr, ok := c3.Value.(*IncchrExpr)
+	if !ok || incchr.Path != "font.png" {
+		t.Fatalf("expected IncchrExpr with path font.png, got %+v", c3.Value)
+	}
+
+	// 4. raw_bin
+	c4, ok := file.Decls[3].(*ConstDecl)
+	if !ok || c4.Name != "raw_bin" {
+		t.Fatalf("expected ConstDecl raw_bin, got %+v", file.Decls[3])
+	}
+	incbin, ok := c4.Value.(*IncbinExpr)
+	if !ok || incbin.Path != "data.bin" {
+		t.Fatalf("expected IncbinExpr with path data.bin, got %+v", c4.Value)
+	}
+
+	// 5. fontPal (var)
+	v1, ok := file.Decls[4].(*VarDecl)
+	if !ok || v1.Name != "fontPal" {
+		t.Fatalf("expected VarDecl fontPal, got %+v", file.Decls[4])
+	}
+	vIncpal, ok := v1.Init.(*IncpalExpr)
+	if !ok || vIncpal.Path != "font.png" {
+		t.Fatalf("expected VarDecl Init IncpalExpr, got %+v", v1.Init)
+	}
+}
+
+
 

@@ -456,6 +456,37 @@ For interfacing with 16-bit addresses and banked assets:
 - `high(val)` or `>val`: Extracts the high byte (`(val >> 8) & $FF`).
 - `bank(symbol)` or `^symbol`: Returns the 8KB PRG-ROM bank number of `symbol`.
 
+### 9.5 Data Inclusion Expressions
+`m3` provides built-in data inclusion expressions that import raw files, convert graphics to NES CHR tiles, or extract hardware palettes at compile time. Inclusion expressions can be used in place of any `uint8[]` literal value.
+
+| Expression | Return Type | Description |
+| :--- | :--- | :--- |
+| `incbin(rel_path)` | `uint8[]` | Includes raw binary bytes directly from the specified file. |
+| `incchr(rel_path)` | `uint8[]` | Converts a PNG image into standard NES 2BPP planar CHR tile data (16 bytes per 8x8 tile). Image width and height must be multiples of 8. |
+| `incpal(rel_path [, n])` | `uint8[]` | Extracts palette colors from a PNG image and converts them to NES hardware 2C02 palette index bytes (`$00`–`$3F`). Optional count `n` defaults to `4` (single sub-palette) or up to `16`. |
+
+#### File Path Resolution
+All `rel_path` strings are resolved relative to the directory containing the source file.
+
+#### Examples
+```go
+package data
+
+// Include binary data
+const raw_level uint8[] = incbin("levels/level1.bin")
+
+// Convert PNG to CHR tile data
+const font_chr uint8[] bank 1 = incchr("font.png")
+const sprite_chr uint8[] bank 1 = incchr("sprites.png")
+
+// Extract NES 2C02 palettes from PNG images
+const bg_palette uint8[4] = incpal("title.png")
+const font_pal uint8[16] = incpal("font.png", 16)
+
+// Initialize RAM buffer with palette data
+var fontPal uint8[16] = incpal("font.png", 16)
+```
+
 ---
 
 ## 10. Inline Assembly Integration (`asm`)

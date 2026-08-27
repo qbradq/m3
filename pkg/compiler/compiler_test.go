@@ -1,6 +1,9 @@
 package compiler
 
 import (
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -483,5 +486,110 @@ func main() bank 0 {
 		t.Fatalf("expected ROM size %d, got %d", 16+64*8192, len(rom))
 	}
 }
+
+func TestCompileInclusionExpressions(t *testing.T) {
+	src := `
+package main
+
+const (
+    font_pal   uint8[16] = incpal("font.png", 16)
+    bg_pal     uint8[4]  = incpal("title.png")
+    font_chr   uint8[]   = incchr("font.png")
+    raw_data   uint8[]   = incbin("data.bin")
+)
+
+var fontPal uint8[16] = incpal("font.png", 16)
+
+func main() bank 0 {
+    asm {
+        NOP
+    }
+}
+`
+
+	_, asmOutput, err := Compile("test_inc.m3", src)
+	if err != nil {
+		t.Fatalf("compilation failed: %v", err)
+	}
+
+	expectedDirectives := []string{
+		".incpal \"font.png\", 16",
+		".incpal \"title.png\"",
+		".incchr \"font.png\"",
+		".incbin \"data.bin\"",
+		"_fontPal:\n  .res 16",
+	}
+
+	for _, exp := range expectedDirectives {
+		if !strings.Contains(asmOutput, exp) {
+			t.Errorf("expected assembly to contain %q, got:\n%s", exp, asmOutput)
+		}
+	}
+}
+
+func TestBuildInclusionExpressions(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. Create a valid test PNG (8x8 pixels, 4 colors)
+	pal := color.Palette{
+		color.RGBA{0, 0, 0, 255},
+		color.RGBA{255, 0, 0, 255},
+		color.RGBA{0, 255, 0, 255},
+		color.RGBA{0, 0, 255, 255},
+	}
+	img := image.NewPaletted(image.Rect(0, 0, 8, 8), pal)
+	for x := 0; x < 8; x++ {
+		img.SetColorIndex(x, 0, uint8(x%4))
+	}
+	pngPath := filepath.Join(tmpDir, "font.png")
+	f, err := os.Create(pngPath)
+	if err != nil {
+		t.Fatalf("failed to create temp font.png: %v", err)
+	}
+	if err := png.Encode(f, img); err != nil {
+		t.Fatalf("failed to encode temp font.png: %v", err)
+	}
+	f.Close()
+
+	// 2. Create raw binary file
+	binData := []byte{0xDE, 0xAD, 0xBE, 0xEF}
+	if err := os.WriteFile(filepath.Join(tmpDir, "raw.bin"), binData, 0644); err != nil {
+		t.Fatalf("failed to write temp raw.bin: %v", err)
+	}
+
+	// 3. Create main.m3 using incpal, incchr, incbin
+	mainSrc := `
+package main
+
+const (
+    font_pal uint8[16] = incpal("font.png", 16)
+    font_chr uint8[]   = incchr("font.png")
+    bin_data uint8[]   = incbin("raw.bin")
+)
+
+var font_buf uint8[16] = incpal("font.png", 16)
+
+func main() bank 0 {
+    asm {
+        LDA _font_pal
+        LDA _bin_data
+    }
+}
+`
+	mainPath := filepath.Join(tmpDir, "main.m3")
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0644); err != nil {
+		t.Fatalf("failed to write main.m3: %v", err)
+	}
+
+	rom, err := Build([]string{mainPath})
+	if err != nil {
+		t.Fatalf("Build with inclusion expressions failed: %v", err)
+	}
+
+	if len(rom) != 16+64*8192 {
+		t.Fatalf("expected ROM size %d, got %d", 16+64*8192, len(rom))
+	}
+}
+
 
 

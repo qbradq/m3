@@ -55,6 +55,9 @@ func move_player(dx int8, dy int8) bank 0 {
   assert.ok(completionLabels.includes('zp'), 'Should include zp storage');
   assert.ok(completionLabels.includes('func'), 'Should include func keyword');
   assert.ok(completionLabels.includes('low'), 'Should include low intrinsic');
+  assert.ok(completionLabels.includes('incbin'), 'Should include incbin intrinsic');
+  assert.ok(completionLabels.includes('incchr'), 'Should include incchr intrinsic');
+  assert.ok(completionLabels.includes('incpal'), 'Should include incpal intrinsic');
   assert.ok(completionLabels.includes('move_player'), 'Should include user func move_player');
   assert.ok(completionLabels.includes('Player'), 'Should include user struct Player');
   assert.ok(completionLabels.includes('PPU_CTRL'), 'Should include user define PPU_CTRL');
@@ -178,6 +181,22 @@ func init_engine() bank 63 {
   const funcHoverText = (funcHover!.contents as MarkupContent).value;
   assert.ok(funcHoverText.includes('func init_engine()'));
   assert.ok(funcHoverText.includes('Initialize the game engine'));
+
+  // Hover on intrinsics incbin, incchr, incpal
+  const incbinDoc = TextDocument.create('file:///test.m3', 'm3', 2, 'const data uint8[] = incbin("file.bin")');
+  const incbinHover = getM3Hover(incbinDoc, { line: 0, character: 23 }, parsed);
+  assert.ok(incbinHover, 'Hover on incbin should return documentation');
+  assert.ok((incbinHover!.contents as MarkupContent).value.includes('incbin(rel_path)'));
+
+  const incchrDoc = TextDocument.create('file:///test.m3', 'm3', 3, 'const chr uint8[] = incchr("font.png")');
+  const incchrHover = getM3Hover(incchrDoc, { line: 0, character: 22 }, parsed);
+  assert.ok(incchrHover, 'Hover on incchr should return documentation');
+  assert.ok((incchrHover!.contents as MarkupContent).value.includes('incchr(rel_path)'));
+
+  const incpalDoc = TextDocument.create('file:///test.m3', 'm3', 4, 'var pal uint8[16] = incpal("font.png", 16)');
+  const incpalHover = getM3Hover(incpalDoc, { line: 0, character: 22 }, parsed);
+  assert.ok(incpalHover, 'Hover on incpal should return documentation');
+  assert.ok((incpalHover!.contents as MarkupContent).value.includes('incpal(rel_path'));
 }
 
 function testAsmParsingAndCompletion() {

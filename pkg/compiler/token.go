@@ -45,6 +45,11 @@ const (
 	TokenBank     // bank
 	TokenAuto     // auto
 
+	// Data Inclusion Keywords
+	TokenIncbin // incbin
+	TokenIncchr // incchr
+	TokenIncpal // incpal
+
 	// Built-in Types & Boolean Literals
 	TokenTrue  // true
 	TokenFalse // false
@@ -132,6 +137,9 @@ var tokenNames = map[TokenType]string{
 	TokenWorkRAM:    "workram",
 	TokenBank:       "bank",
 	TokenAuto:       "auto",
+	TokenIncbin:     "incbin",
+	TokenIncchr:     "incchr",
+	TokenIncpal:     "incpal",
 	TokenTrue:       "true",
 	TokenFalse:      "false",
 	TokenPlus:        "+",
@@ -241,6 +249,9 @@ var keywords = map[string]TokenType{
 	"workram":  TokenWorkRAM,
 	"bank":     TokenBank,
 	"auto":     TokenAuto,
+	"incbin":   TokenIncbin,
+	"incchr":   TokenIncchr,
+	"incpal":   TokenIncpal,
 	"true":     TokenTrue,
 	"false":    TokenFalse,
 }

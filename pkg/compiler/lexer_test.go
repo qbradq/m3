@@ -127,6 +127,19 @@ func TestLexerAsmBlock(t *testing.T) {
 	}
 }
 
+func TestLexerInclusionKeywords(t *testing.T) {
+	input := `incbin incchr incpal`
+	lexer := NewLexer("inc_test.m3", input)
+
+	expected := []TokenType{TokenIncbin, TokenIncchr, TokenIncpal}
+	for _, exp := range expected {
+		tok := lexer.NextToken()
+		if tok.Type != exp {
+			t.Errorf("expected token type %v, got %v (%q)", exp, tok.Type, tok.Literal)
+		}
+	}
+}
+
 func stringsContains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || (len(s) > 0 && len(substr) > 0 && func() bool {
 		for i := 0; i+len(substr) <= len(s); i++ {
@@ -137,3 +150,4 @@ func stringsContains(s, substr string) bool {
 		return false
 	}()))
 }
+
