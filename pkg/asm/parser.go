@@ -212,6 +212,10 @@ func (p *Parser) parseOperationOrDirective() (Statement, error) {
 		return p.parseMemoryDirective(SegmentRAM)
 	case TokenDotWRAM:
 		return p.parseMemoryDirective(SegmentWRAM)
+	case TokenDotData:
+		return p.parseMemoryDirective(SegmentData)
+	case TokenDotCode:
+		return p.parseMemoryDirective(SegmentPRG)
 	case TokenDotByte:
 		return p.parseDataDirective(DataByte)
 	case TokenDotWord:

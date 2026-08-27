@@ -591,5 +591,48 @@ func main() bank 0 {
 	}
 }
 
+func TestCompileDataDeclarations(t *testing.T) {
+	src := `
+package testpkg
+
+data title_image bank 2 = incbin("title.bin")
+
+data (
+    FontPal = incpal("font.png", 16)
+    FontChr bank 3 = incchr("font.png")
+    CustomTable = [4]uint8{1, 2, 3, 4}
+)
+`
+	_, asmOutput, err := Compile("test.m3", src)
+	if err != nil {
+		t.Fatalf("Compile failed: %v", err)
+	}
+
+	expectedSnippets := []string{
+		".bank 2",
+		".data",
+		"_testpkg_title_image:",
+		".incbin \"title.bin\"",
+		".bank auto",
+		"_testpkg_FontPal:",
+		".export _testpkg_FontPal",
+		".incpal \"font.png\", 16",
+		".bank 3",
+		"_testpkg_FontChr:",
+		".export _testpkg_FontChr",
+		".incchr \"font.png\"",
+		"_testpkg_CustomTable:",
+		".export _testpkg_CustomTable",
+		".byte $01, $02, $03, $04",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(asmOutput, snippet) {
+			t.Errorf("expected assembly output to contain %q, got:\n%s", snippet, asmOutput)
+		}
+	}
+}
+
+
 
 

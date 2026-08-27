@@ -19,9 +19,10 @@ const (
 	INESHeaderSize  = 16
 	TotalOutputSize = INESHeaderSize + PRGROMSize
 
-	Bank0BaseAddr  = 0x8000
-	Bank62BaseAddr = 0xC000
-	Bank63BaseAddr = 0xE000
+	DataBankBaseAddr = 0x8000 // $8000 - $9FFF dedicated data bank
+	CodeBankBaseAddr = 0xA000 // $A000 - $BFFF dedicated code swap bank
+	Bank62BaseAddr   = 0xC000 // $C000 - $DFFF fixed bank 62
+	Bank63BaseAddr   = 0xE000 // $E000 - $FFFF fixed bank 63
 
 	// RAM Segment base addresses and capacity limits
 	ZPBaseAddr   = 0x0000
@@ -222,17 +223,22 @@ func (l *Linker) getChunkOffset(fileIdx int, bankIdx uint32) uint32 {
 	return 0
 }
 
-func BankBaseAddress(bankIndex uint32) int64 {
+func BankSymbolBaseAddress(bankIndex uint32, symType obj.SymbolType) int64 {
 	switch bankIndex {
-	case 0:
-		return Bank0BaseAddr // $8000
-	case NumBanks - 2: // Bank 62
-		return Bank62BaseAddr // $C000
 	case NumBanks - 1: // Bank 63
 		return Bank63BaseAddr // $E000
+	case NumBanks - 2: // Bank 62
+		return Bank62BaseAddr // $C000
 	default:
-		return 0x0000
+		if symType == obj.SymbolTypeData {
+			return DataBankBaseAddr // $8000
+		}
+		return CodeBankBaseAddr // $A000
 	}
+}
+
+func BankBaseAddress(bankIndex uint32) int64 {
+	return BankSymbolBaseAddress(bankIndex, obj.SymbolTypeLabel)
 }
 
 func (l *Linker) collectSymbols() error {
@@ -328,14 +334,14 @@ func (l *Linker) collectSymbols() error {
 				}
 				chunkOffset := l.getChunkOffset(fileIdx, assignedBank)
 				finalOffset = chunkOffset + uint32(sym.Value)
-				baseAddr := BankBaseAddress(assignedBank)
+				baseAddr := BankSymbolBaseAddress(assignedBank, sym.Type)
 				addr = baseAddr + int64(finalOffset)
 				resolvedSymBank = int32(assignedBank)
 			default:
 				if sym.Bank >= 0 {
 					chunkOffset := l.getChunkOffset(fileIdx, uint32(sym.Bank))
 					finalOffset = chunkOffset + uint32(sym.Value)
-					baseAddr := BankBaseAddress(uint32(sym.Bank))
+					baseAddr := BankSymbolBaseAddress(uint32(sym.Bank), sym.Type)
 					addr = baseAddr + int64(finalOffset)
 				} else {
 					addr = sym.Value
@@ -367,7 +373,7 @@ func (l *Linker) collectSymbols() error {
 	}
 
 	// Handle main entry point
-	mainCandidates := []string{"_main", "main", "_main_main", "main_main"}
+	mainCandidates := []string{"_main_main", "main_main", "_main", "main"}
 	var mainSym *resolvedSymbol
 	var hasMain bool
 	for _, name := range mainCandidates {
@@ -390,12 +396,10 @@ func (l *Linker) collectSymbols() error {
 		return fmt.Errorf("linker error: undefined symbol \"main\" (entry point required)")
 	}
 	if hasMain {
-		if _, ok := l.globalSyms["_main"]; !ok {
-			l.globalSyms["_main"] = mainSym
-		}
-		if _, ok := l.globalSyms["main"]; !ok {
-			l.globalSyms["main"] = mainSym
-		}
+		l.globalSyms["_main"] = mainSym
+		l.globalSyms["main"] = mainSym
+		l.globalSyms["_main_main"] = mainSym
+		l.globalSyms["main_main"] = mainSym
 	}
 
 	// Handle NMI interrupt routine

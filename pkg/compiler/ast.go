@@ -172,6 +172,20 @@ func (c *ConstDecl) Pos() Position { return c.pos }
 func (c *ConstDecl) declNode()     {}
 func (c *ConstDecl) stmtNode()     {}
 
+// DataDecl represents a banked ROM data definition:
+// data identifier [bank n] = data_expr
+type DataDecl struct {
+	Package string
+	Name    string
+	Bank    *BankSpec
+	Value   Expr
+	pos     Position
+}
+
+func (d *DataDecl) Pos() Position { return d.pos }
+func (d *DataDecl) declNode()     {}
+func (d *DataDecl) stmtNode()     {}
+
 // DefineDecl represents a compile-time constant definition: define identifier const_expr
 type DefineDecl struct {
 	Package string

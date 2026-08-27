@@ -493,6 +493,10 @@ func lookupDirective(name string) TokenType {
 		return TokenDotRAM
 	case ".wram", ".prgram", ".sram":
 		return TokenDotWRAM
+	case ".data":
+		return TokenDotData
+	case ".code", ".prg":
+		return TokenDotCode
 	case ".byte", ".byt", ".db":
 		return TokenDotByte
 	case ".word", ".addr", ".dw":

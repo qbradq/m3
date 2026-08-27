@@ -16,6 +16,7 @@ const (
 	SymbolTypeLabel SymbolType = iota
 	SymbolTypeConst
 	SymbolTypeImport
+	SymbolTypeData
 )
 
 func (t SymbolType) String() string {
@@ -26,6 +27,8 @@ func (t SymbolType) String() string {
 		return "CONST"
 	case SymbolTypeImport:
 		return "IMPORT"
+	case SymbolTypeData:
+		return "DATA"
 	default:
 		return fmt.Sprintf("TYPE_%d", t)
 	}

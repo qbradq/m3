@@ -28,6 +28,8 @@ const (
 	TokenDotZP      // .zp
 	TokenDotRAM     // .ram
 	TokenDotWRAM    // .wram
+	TokenDotData    // .data
+	TokenDotCode    // .code, .prg
 	TokenDotByte    // .byte, .byt, .db
 	TokenDotWord    // .word, .addr, .dw
 	TokenDotDword   // .dword, .dd

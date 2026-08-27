@@ -13,16 +13,16 @@ The NES contains limited internal memory and relies on mapper hardware for bank 
 ```
 +------------------+ $FFFF  -------------------------+
 | Fixed PRG-ROM    |                                 |
-| Bank 63 ($E000)  |        PRG-ROM Banks            |
+| Bank 63 ($E000)  |  Fixed Bank 63: Runtime & Vecs  |
 +------------------+ $DFFF  (512KB Total, 8KB Banks) |
 | Fixed PRG-ROM    |                                 |
-| Bank 62 ($C000)  |  - Code & Const Data            |
-+------------------+ $BFFF  - Bank 0..63             |
-| Switchable PRG   |  - Bank 'auto' placement        |
-| Bank 1 ($A000)   |                                 |
+| Bank 62 ($C000)  |  Fixed Bank 62: PRG-ROM         |
++------------------+ $BFFF                           |
+| Switchable PRG   |  Code Swap Bank ($A000-$BFFF)   |
+| R7 Window        |  - Functions & `const` data     |
 +------------------+ $9FFF                           |
-| Switchable PRG   |                                 |
-| Bank 0 ($8000)   |                                 |
+| Switchable PRG   |  Dedicated Data Bank ($8000)    |
+| R6 Window        |  - Banked `data` assets         |
 +------------------+ $7FFF  -------------------------+
 | MMC3 Work RAM    | 8KB Battery-Backed RAM (`wram` / `workram`)
 +------------------+ $5FFF
@@ -38,13 +38,14 @@ The NES contains limited internal memory and relies on mapper hardware for bank 
 
 ### 1.1 Storage Types
 
-`m3` supports three RAM storage specifiers:
+`m3` supports explicit RAM storage specifiers and dedicated ROM banking targets:
 
 | Storage Specifier | Aliases | Address Range | Description |
 | :--- | :--- | :--- | :--- |
 | `zp` | `zeropage` | `$0000 - $00FF` (256 B) | High-speed single-byte addressing. Ideal for hot loop counters, pointers, and parameter scratchpads. |
 | `ram` | *(default)* | `$0300 - $07FF` (1.25 KB) | Standard internal NES CPU RAM. Default storage when none is specified. |
 | `wram` | `workram` | `$6000 - $7FFF` (8 KB) | MMC3 PRG-RAM segment. Often battery-backed for save games or used for large working buffers. |
+| `data` | - | `$8000 - $9FFF` (8 KB) | Banked ROM data assets (CHR tiles, palettes, binary maps). Swapped into the R6 window when accessed. |
 
 ---
 
@@ -171,7 +172,7 @@ var (
 
 ---
 
-## 5. Compile-Time Definitions (`define`) & ROM Data (`const`)
+## 5. Compile-Time Definitions (`define`), Constants (`const`), & Banked Data (`data`)
 
 ### 5.1 Compile-Time Definitions (`define`)
 
@@ -210,9 +211,9 @@ define (
 
 ---
 
-### 5.2 Constant & ROM Data Definitions (`const`)
+### 5.2 Constant Definitions (`const`)
 
-The `const` keyword defines immutable values or static data tables placed into **PRG-ROM**.
+The `const` keyword defines immutable values or code-side lookup tables placed into **PRG-ROM** in the **Code Swap Bank (`$A000-$BFFF`)** (or fixed banks 62/63).
 
 #### Syntax
 
@@ -226,13 +227,14 @@ const identifier type[length] bank = value
   - If length is omitted (or `[]`), length is automatically inferred from the value initializer.
   - If length is `1` (or scalar), it is treated as a standard scalar constant placed in ROM.
 - **`bank` (optional)**:
-  - `bank <n>`: Places the data into PRG-ROM bank `n` (`0` to `63`).
+  - `bank <n>`: Places the constant into PRG-ROM bank `n` (`0` to `63`).
   - If bank is omitted, it defaults to **`bank auto`**, where the `m3` linker automatically packs the data into available PRG-ROM banks.
+- **Address Relocation**: Relocated to the `$A000-$BFFF` code bank window.
 
 #### Examples
 
 ```go
-// Inferred length table placed with link-time auto banking
+// Inferred length table placed in switchable code bank ($A000-$BFFF)
 const sine_table uint8[] = [32]uint8{
     0, 24, 49, 73, 96, 117, 136, 153, 
     166, 177, 184, 187, 187, 182, 174, 162,
@@ -240,11 +242,50 @@ const sine_table uint8[] = [32]uint8{
     0, 0, 0, 0, 0, 0, 0, 0,
 }
 
-// Explicit fixed length table with zero-padding
+// Explicit fixed length table in Bank 0 (relocated to $A000)
 const palette_data uint8[16] bank 0 = [4]uint8{$0F, $00, $10, $30} // Padded to 16 bytes
 
-// String data in ROM
+// String data in Fixed Bank 63 (relocated to $E000)
 const title_string string[] bank 63 = "SUPER NES GAME\0"
+```
+
+---
+
+### 5.3 Banked Data Storage (`data`)
+
+The `data` keyword defines static assets (CHR graphics, palettes, binary level data, large asset arrays) placed into **PRG-ROM** that are relocated to the dedicated **Data Bank window (`$8000-$9FFF`)**.
+
+When the HLL accesses `data` definitions, it switches the active PRG bank in the `$8000` window (MMC3 register 6).
+
+#### Syntax
+
+```go
+// Single declaration
+data identifier [bank n] = data_expr
+
+// Grouped declaration
+data (
+    identifier1 [bank n1] = data_expr1
+    identifier2 [bank n2] = data_expr2
+)
+```
+
+- **`bank` (optional)**: Specifies explicit PRG-ROM bank (`0`–`63`) or `bank auto` (default).
+- **`data_expr`**: An array literal (e.g. `[16]uint8{...}`), string literal, or data inclusion expression (`incbin(...)`, `incchr(...)`, `incpal(...)`).
+- **Address Relocation**: All `data` symbols relocate to the `$8000-$9FFF` range.
+
+#### Examples
+
+```go
+package assets
+
+// Banked graphical and sound assets
+data (
+    TitleChr  bank 1 = incchr("title.png")
+    TitlePal  bank 1 = incpal("title.png")
+    WorldMap  bank 2 = incbin("world.bin")
+    FontChr   = incchr("font.png")
+)
 ```
 
 ---

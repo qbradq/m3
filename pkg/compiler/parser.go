@@ -71,7 +71,7 @@ func (p *Parser) ParseSourceFile() (*SourceFile, error) {
 	// Optional package statement
 	if p.curTokenIs(TokenPackage) {
 		p.nextToken()
-		if !p.curTokenIs(TokenIdent) {
+		if !p.curTokenIs(TokenIdent) && !p.curTokenIs(TokenData) {
 			p.errorf("expected package name identifier, got %s", p.curToken.Type)
 			return nil, p.errorResult()
 		}
@@ -106,6 +106,15 @@ func (p *Parser) ParseSourceFile() (*SourceFile, error) {
 
 		case TokenConst:
 			decls, err := p.parseConstDecl()
+			if err != nil {
+				return nil, err
+			}
+			for _, d := range decls {
+				file.Decls = append(file.Decls, d)
+			}
+
+		case TokenData:
+			decls, err := p.parseDataDecl()
 			if err != nil {
 				return nil, err
 			}
@@ -153,6 +162,10 @@ func (p *Parser) ParseSourceFile() (*SourceFile, error) {
 				d.Package = file.PackageName
 			}
 		case *ConstDecl:
+			if d.Package == "" {
+				d.Package = file.PackageName
+			}
+		case *DataDecl:
 			if d.Package == "" {
 				d.Package = file.PackageName
 			}
@@ -387,6 +400,77 @@ func (p *Parser) parseSingleConstDecl() (*ConstDecl, error) {
 		Bank:   bankSpec,
 		Value:  valueExpr,
 		pos:    pos,
+	}, nil
+}
+
+// ----------------------------------------------------------------------------
+// Data Declarations
+// ----------------------------------------------------------------------------
+
+func (p *Parser) parseDataDecl() ([]*DataDecl, error) {
+	p.nextToken() // consume 'data'
+
+	var decls []*DataDecl
+
+	if p.curTokenIs(TokenLParen) {
+		// Grouped data declaration: data ( ... )
+		p.nextToken() // consume '('
+		p.skipSemicolons()
+		for !p.curTokenIs(TokenRParen) && !p.curTokenIs(TokenEOF) {
+			d, err := p.parseSingleDataDecl()
+			if err != nil {
+				return nil, err
+			}
+			decls = append(decls, d)
+			p.skipSemicolons()
+		}
+		if !p.expect(TokenRParen) {
+			return nil, p.errorResult()
+		}
+	} else {
+		d, err := p.parseSingleDataDecl()
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, d)
+	}
+
+	return decls, nil
+}
+
+func (p *Parser) parseSingleDataDecl() (*DataDecl, error) {
+	pos := p.curToken.Pos
+	if !p.curTokenIs(TokenIdent) {
+		p.errorf("expected data name identifier, got %s (%q)", p.curToken.Type, p.curToken.Literal)
+		return nil, p.errorResult()
+	}
+	name := p.curToken.Literal
+	p.nextToken()
+
+	// Bank specifier (optional: bank <n> / bank auto)
+	var bankSpec *BankSpec
+	var err error
+	if p.curTokenIs(TokenBank) {
+		bankSpec, err = p.parseBankSpec()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if !p.expect(TokenEq) {
+		return nil, p.errorResult()
+	}
+
+	valueExpr, err := p.parseExpression(0)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DataDecl{
+		Name:  name,
+		Bank:  bankSpec,
+		Value: valueExpr,
+		pos:   pos,
 	}, nil
 }
 
@@ -1249,7 +1333,7 @@ func (p *Parser) parsePrefixExpression() (Expr, error) {
 		p.nextToken()
 		return &BoolLit{Value: false, pos: pos}, nil
 
-	case TokenIdent, TokenBank:
+	case TokenIdent, TokenBank, TokenData:
 		ident := &Ident{Name: p.curToken.Literal, pos: pos}
 		p.nextToken()
 		return p.parsePostfix(ident)

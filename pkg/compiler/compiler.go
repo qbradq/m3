@@ -289,6 +289,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 	var ramVars []*VarDecl
 	var wramVars []*VarDecl
 	var defineDecls []*DefineDecl
+	var dataDecls []*DataDecl
 	var constDecls []*ConstDecl
 	var funcDecls []*FuncDecl
 
@@ -305,6 +306,8 @@ func generateAssembly(file *SourceFile) (string, error) {
 			}
 		case *DefineDecl:
 			defineDecls = append(defineDecls, d)
+		case *DataDecl:
+			dataDecls = append(dataDecls, d)
 		case *ConstDecl:
 			constDecls = append(constDecls, d)
 		case *FuncDecl:
@@ -382,7 +385,61 @@ func generateAssembly(file *SourceFile) (string, error) {
 		sb.WriteString("\n")
 	}
 
-	// Constants / PRG-ROM
+	// Banked Data (Relocated to $8000-$9FFF)
+	if len(dataDecls) > 0 {
+		sb.WriteString("; Banked Data (Relocated to $8000-$9FFF)\n")
+		for _, d := range dataDecls {
+			if d.Bank != nil {
+				if d.Bank.IsAuto {
+					sb.WriteString(".bank auto\n")
+				} else if num, ok := d.Bank.Value.(*NumberLit); ok {
+					sb.WriteString(fmt.Sprintf(".bank %d\n", num.Value))
+				}
+			} else {
+				sb.WriteString(".bank auto\n")
+			}
+			sb.WriteString(".data\n")
+			pkg := d.Package
+			if pkg == "" {
+				pkg = file.PackageName
+			}
+			name := mangleSymbol(pkg, d.Name)
+			if isExported(d.Name) {
+				sb.WriteString(fmt.Sprintf(".export %s\n", name))
+			}
+			sb.WriteString(fmt.Sprintf("%s:\n", name))
+			if strLit, ok := d.Value.(*StringLit); ok {
+				sb.WriteString(fmt.Sprintf("  .asciiz %q\n", strLit.Value))
+			} else if arrLit, ok := d.Value.(*ArrayLit); ok {
+				var items []string
+				for _, elem := range arrLit.Elements {
+					if n, ok := elem.(*NumberLit); ok {
+						items = append(items, fmt.Sprintf("$%02X", n.Value&0xFF))
+					} else {
+						items = append(items, "0")
+					}
+				}
+				if len(items) > 0 {
+					sb.WriteString(fmt.Sprintf("  .byte %s\n", strings.Join(items, ", ")))
+				}
+			} else if numLit, ok := d.Value.(*NumberLit); ok {
+				sb.WriteString(fmt.Sprintf("  .word $%04X\n", numLit.Value))
+			} else if incbin, ok := d.Value.(*IncbinExpr); ok {
+				sb.WriteString(fmt.Sprintf("  .incbin %q\n", incbin.Path))
+			} else if incchr, ok := d.Value.(*IncchrExpr); ok {
+				sb.WriteString(fmt.Sprintf("  .incchr %q\n", incchr.Path))
+			} else if incpal, ok := d.Value.(*IncpalExpr); ok {
+				if incpal.Count != nil {
+					sb.WriteString(fmt.Sprintf("  .incpal %q, %s\n", incpal.Path, formatConstExpr(incpal.Count, pkg)))
+				} else {
+					sb.WriteString(fmt.Sprintf("  .incpal %q\n", incpal.Path))
+				}
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// Constants / PRG-ROM (Relocated to $A000-$BFFF)
 	if len(constDecls) > 0 {
 		sb.WriteString("; Constants and ROM Data\n")
 		for _, c := range constDecls {
@@ -395,6 +452,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 			} else {
 				sb.WriteString(".bank auto\n")
 			}
+			sb.WriteString(".code\n")
 			pkg := c.Package
 			if pkg == "" {
 				pkg = file.PackageName
@@ -435,7 +493,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 		}
 	}
 
-	// Functions / Procedures
+	// Functions / Procedures (Relocated to $A000-$BFFF)
 	if len(funcDecls) > 0 {
 		sb.WriteString("; Functions\n")
 		for _, f := range funcDecls {
@@ -448,6 +506,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 			} else {
 				sb.WriteString(".bank auto\n")
 			}
+			sb.WriteString(".code\n")
 
 			pkg := f.Package
 			if pkg == "" {

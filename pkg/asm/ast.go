@@ -63,6 +63,7 @@ const (
 	SegmentZP
 	SegmentRAM
 	SegmentWRAM
+	SegmentData
 )
 
 // MemoryDirective: .zp, .ram, .wram with optional size: .zp [<size>]

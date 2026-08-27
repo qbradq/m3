@@ -225,6 +225,7 @@ func (a *Assembler) pass1() error {
 				if s.IsProc && s.Name != "" {
 					var currentOffset uint32
 					var currentBank int32
+					var symType = obj.SymbolTypeLabel
 					switch a.currentSegment {
 					case SegmentPRG:
 						currentOffset = bankOffsets[a.currentBank]
@@ -233,6 +234,14 @@ func (a *Assembler) pass1() error {
 						} else {
 							currentBank = int32(a.currentBank)
 						}
+					case SegmentData:
+						currentOffset = bankOffsets[a.currentBank]
+						if a.currentBank == obj.BankAutoIndex {
+							currentBank = obj.BankAuto
+						} else {
+							currentBank = int32(a.currentBank)
+						}
+						symType = obj.SymbolTypeData
 					case SegmentZP:
 						currentOffset = a.zpOffset
 						currentBank = obj.BankZP
@@ -246,7 +255,7 @@ func (a *Assembler) pass1() error {
 					currentGlobalLabel = s.Name
 					a.symbols[s.Name] = symbolEntry{
 						name:  s.Name,
-						sTyp:  obj.SymbolTypeLabel,
+						sTyp:  symType,
 						scope: obj.ScopeGlobal,
 						bank:  currentBank,
 						val:   int64(currentOffset),
@@ -311,6 +320,7 @@ func (a *Assembler) pass1() error {
 		case *LabelStmt:
 			var currentOffset uint32
 			var currentBank int32
+			var symType = obj.SymbolTypeLabel
 			switch a.currentSegment {
 			case SegmentPRG:
 				currentOffset = bankOffsets[a.currentBank]
@@ -319,6 +329,14 @@ func (a *Assembler) pass1() error {
 				} else {
 					currentBank = int32(a.currentBank)
 				}
+			case SegmentData:
+				currentOffset = bankOffsets[a.currentBank]
+				if a.currentBank == obj.BankAutoIndex {
+					currentBank = obj.BankAuto
+				} else {
+					currentBank = int32(a.currentBank)
+				}
+				symType = obj.SymbolTypeData
 			case SegmentZP:
 				currentOffset = a.zpOffset
 				currentBank = obj.BankZP
@@ -340,7 +358,7 @@ func (a *Assembler) pass1() error {
 				})
 				a.symbols[anonName] = symbolEntry{
 					name:  anonName,
-					sTyp:  obj.SymbolTypeLabel,
+					sTyp:  symType,
 					scope: obj.ScopeLocal,
 					bank:  currentBank,
 					val:   int64(currentOffset),
@@ -350,7 +368,7 @@ func (a *Assembler) pass1() error {
 				fullName := currentGlobalLabel + s.Name
 				a.symbols[fullName] = symbolEntry{
 					name:  fullName,
-					sTyp:  obj.SymbolTypeLabel,
+					sTyp:  symType,
 					scope: obj.ScopeLocal,
 					bank:  currentBank,
 					val:   int64(currentOffset),
@@ -363,7 +381,7 @@ func (a *Assembler) pass1() error {
 				currentGlobalLabel = fullName
 				a.symbols[fullName] = symbolEntry{
 					name:  fullName,
-					sTyp:  obj.SymbolTypeLabel,
+					sTyp:  symType,
 					scope: obj.ScopeGlobal,
 					bank:  currentBank,
 					val:   int64(currentOffset),
@@ -387,7 +405,7 @@ func (a *Assembler) pass1() error {
 				return fmt.Errorf("%s: .res size must evaluate to a constant in pass 1: %w", s.Pos(), err)
 			}
 			switch a.currentSegment {
-			case SegmentPRG:
+			case SegmentPRG, SegmentData:
 				bankOffsets[a.currentBank] += uint32(sizeVal)
 			case SegmentZP:
 				a.zpOffset += uint32(sizeVal)
@@ -913,7 +931,7 @@ func (a *Assembler) emitData(d *DataDirective, currentGlobal string) error {
 }
 
 func (a *Assembler) emitReserve(r *ReserveDirective) error {
-	if a.currentSegment != SegmentPRG {
+	if a.currentSegment != SegmentPRG && a.currentSegment != SegmentData {
 		return nil
 	}
 	bank := a.object.GetOrCreateBank(a.currentBank)

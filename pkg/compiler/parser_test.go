@@ -506,5 +506,66 @@ var rawData uint8[] = incbin("level.bin")
 	}
 }
 
+func TestParseDataDecl(t *testing.T) {
+	src := `
+package testdata
+
+data title_image bank 2 = incbin("title.bin")
+
+data (
+    FontPal = incpal("font.png", 16)
+    FontChr bank 3 = incchr("font.png")
+    CustomTable = [4]uint8{1, 2, 3, 4}
+)
+`
+	lexer := NewLexer("test.m3", src)
+	parser := NewParser(lexer)
+
+	file, err := parser.ParseSourceFile()
+	if err != nil {
+		t.Fatalf("ParseSourceFile failed: %v", err)
+	}
+
+	if len(file.Decls) != 4 {
+		t.Fatalf("expected 4 declarations, got %d", len(file.Decls))
+	}
+
+	d1, ok := file.Decls[0].(*DataDecl)
+	if !ok || d1.Name != "title_image" {
+		t.Fatalf("expected DataDecl title_image, got %+v", file.Decls[0])
+	}
+	if d1.Bank == nil || d1.Bank.Value.(*NumberLit).Value != 2 {
+		t.Errorf("expected bank 2, got %+v", d1.Bank)
+	}
+	if incbin, ok := d1.Value.(*IncbinExpr); !ok || incbin.Path != "title.bin" {
+		t.Errorf("expected incbin path title.bin, got %+v", d1.Value)
+	}
+
+	d2, ok := file.Decls[1].(*DataDecl)
+	if !ok || d2.Name != "FontPal" {
+		t.Fatalf("expected DataDecl FontPal, got %+v", file.Decls[1])
+	}
+	if d2.Bank != nil {
+		t.Errorf("expected nil bank for FontPal, got %+v", d2.Bank)
+	}
+
+	d3, ok := file.Decls[2].(*DataDecl)
+	if !ok || d3.Name != "FontChr" {
+		t.Fatalf("expected DataDecl FontChr, got %+v", file.Decls[2])
+	}
+	if d3.Bank == nil || d3.Bank.Value.(*NumberLit).Value != 3 {
+		t.Errorf("expected bank 3 for FontChr, got %+v", d3.Bank)
+	}
+
+	d4, ok := file.Decls[3].(*DataDecl)
+	if !ok || d4.Name != "CustomTable" {
+		t.Fatalf("expected DataDecl CustomTable, got %+v", file.Decls[3])
+	}
+	if arr, ok := d4.Value.(*ArrayLit); !ok || len(arr.Elements) != 4 {
+		t.Errorf("expected 4-element ArrayLit, got %+v", d4.Value)
+	}
+}
+
+
 
 

@@ -21,6 +21,7 @@ const (
 	TokenImport   // import
 	TokenVar      // var
 	TokenConst    // const
+	TokenData     // data
 	TokenDefine   // define
 	TokenTypeKw   // type
 	TokenStruct   // struct
@@ -116,6 +117,7 @@ var tokenNames = map[TokenType]string{
 	TokenImport:     "import",
 	TokenVar:        "var",
 	TokenConst:      "const",
+	TokenData:       "data",
 	TokenDefine:     "define",
 	TokenTypeKw:     "type",
 	TokenStruct:     "struct",
@@ -228,6 +230,7 @@ var keywords = map[string]TokenType{
 	"import":   TokenImport,
 	"var":      TokenVar,
 	"const":    TokenConst,
+	"data":     TokenData,
 	"define":   TokenDefine,
 	"type":     TokenTypeKw,
 	"struct":   TokenStruct,

@@ -68,12 +68,12 @@ irq_handler:
 
 	// Verify Bank 0 machine code at offset 16 (Header) + 0 (Bank 0)
 	bank0Offset := INESHeaderSize
-	// main is at $8000: LDA #$00 (A9 00), STA $2000 (8D 00 20), JSR helper (20 0B 80), JMP main (4C 00 80), helper: RTS (60)
+	// main is at $A000: LDA #$00 (A9 00), STA $2000 (8D 00 20), JSR helper (20 0B A0), JMP main (4C 00 A0), helper: RTS (60)
 	expectedBank0 := []byte{
 		0xA9, 0x00, // LDA #$00
 		0x8D, 0x00, 0x20, // STA $2000
-		0x20, 0x0B, 0x80, // JSR $800B (helper)
-		0x4C, 0x00, 0x80, // JMP $8000 (main)
+		0x20, 0x0B, 0xA0, // JSR $A00B (helper)
+		0x4C, 0x00, 0xA0, // JMP $A000 (main)
 		0x60, // RTS
 	}
 	for i, exp := range expectedBank0 {
@@ -150,15 +150,15 @@ reset_handler:
 		t.Fatalf("failed to link multiple objects: %v", err)
 	}
 
-	// func_a in Bank 0 starts at $8000: LDA #$01 (2), JSR func_b (3), RTS (1) = 6 bytes
-	// func_b in Bank 0 starts at $8006: LDA #$02 (2), JSR func_a (3), RTS (1) = 6 bytes
+	// func_a in Bank 0 starts at $A000: LDA #$01 (2), JSR func_b (3), RTS (1) = 6 bytes
+	// func_b in Bank 0 starts at $A006: LDA #$02 (2), JSR func_a (3), RTS (1) = 6 bytes
 	bank0Offset := INESHeaderSize
 	expectedBank0 := []byte{
 		0xA9, 0x01, // LDA #$01
-		0x20, 0x06, 0x80, // JSR $8006 (func_b)
+		0x20, 0x06, 0xA0, // JSR $A006 (func_b)
 		0x60, // RTS
 		0xA9, 0x02, // LDA #$02
-		0x20, 0x00, 0x80, // JSR $8000 (func_a)
+		0x20, 0x00, 0xA0, // JSR $A000 (func_a)
 		0x60, // RTS
 	}
 	for i, exp := range expectedBank0 {
@@ -270,14 +270,14 @@ reset_handler:
 	}
 
 	bank63Offset := INESHeaderSize + 63*BankSize
-	// test_label in Bank 1 is at offset 0 (address = 0)
+	// test_label in Bank 1 is at offset 0 (address = $A000)
 	// LDA #<test_label -> A9 00
-	// LDX #>test_label -> A2 00
+	// LDX #>test_label -> A2 A0
 	// LDY #^test_label -> A0 01 (Bank 1)
 	// RTS              -> 60
 	expectedBank63 := []byte{
-		0xA9, 0x00, // LDA #<0 = 0
-		0xA2, 0x00, // LDX #>0 = 0
+		0xA9, 0x00, // LDA #<test_label = $00
+		0xA2, 0xA0, // LDX #>test_label = $A0
 		0xA0, 0x01, // LDY #^test_label = 1 (Bank 1)
 		0x60, // RTS
 	}
@@ -499,9 +499,9 @@ reset_handler:
 		}
 	}
 
-	// Bank 63 at reset_handler: JSR $8000 (20 00 80), LDA #^auto_func (A9 00), RTS (60)
+	// Bank 63 at reset_handler: JSR $A000 (20 00 A0), LDA #^auto_func (A9 00), RTS (60)
 	bank63Offset := INESHeaderSize + 63*BankSize
-	expectedBank63 := []byte{0x20, 0x00, 0x80, 0xA9, 0x00, 0x60}
+	expectedBank63 := []byte{0x20, 0x00, 0xA0, 0xA9, 0x00, 0x60}
 	for i, exp := range expectedBank63 {
 		if rom[bank63Offset+i] != exp {
 			t.Errorf("byte %d in bank 63 mismatch: got 0x%02X, want 0x%02X", i, rom[bank63Offset+i], exp)
@@ -1011,6 +1011,80 @@ _len_cnt:
 		t.Fatalf("expected ROM size %d, got %d", TotalOutputSize, len(rom))
 	}
 }
+
+func TestLinkDataVsCodeRelocation(t *testing.T) {
+	srcData := `
+.export my_palette, my_tiles
+.bank 2
+.data
+my_palette:
+    .byte $0F, $00, $10, $30
+my_tiles:
+    .byte $01, $02, $03, $04
+`
+	srcCode := `
+.export main, my_table
+.import my_palette, my_tiles
+.bank 2
+.code
+my_table:
+    .word $1234
+main:
+    LDA #<my_palette
+    LDX #>my_palette
+    LDY #<my_table
+    LDA #>my_table
+    RTS
+`
+	objData, err := asm.Assemble("data.s", srcData)
+	if err != nil {
+		t.Fatalf("failed to assemble data.s: %v", err)
+	}
+	objCode, err := asm.Assemble("code.s", srcCode)
+	if err != nil {
+		t.Fatalf("failed to assemble code.s: %v", err)
+	}
+
+	l := NewLinker(objData, objCode)
+	_, err = l.Link()
+	if err != nil {
+		t.Fatalf("failed to link: %v", err)
+	}
+
+	// Verify symbol addresses
+	palSym, ok := l.lookupSymbol(0, "my_palette")
+	if !ok {
+		t.Fatalf("my_palette not found")
+	}
+	if palSym.Address != 0x8000 {
+		t.Errorf("my_palette: expected address $8000, got $%04X", palSym.Address)
+	}
+
+	tilesSym, ok := l.lookupSymbol(0, "my_tiles")
+	if !ok {
+		t.Fatalf("my_tiles not found")
+	}
+	if tilesSym.Address != 0x8004 {
+		t.Errorf("my_tiles: expected address $8004, got $%04X", tilesSym.Address)
+	}
+
+	tableSym, ok := l.lookupSymbol(1, "my_table")
+	if !ok {
+		t.Fatalf("my_table not found")
+	}
+	if tableSym.Address != 0xA008 {
+		t.Errorf("my_table: expected address $A008, got $%04X", tableSym.Address)
+	}
+
+	codeSym, ok := l.lookupSymbol(1, "main")
+	if !ok {
+		t.Fatalf("main not found")
+	}
+	if codeSym.Address != 0xA00A {
+		t.Errorf("main: expected address $A00A, got $%04X", codeSym.Address)
+	}
+}
+
 
 
 

@@ -133,35 +133,50 @@ LDA a:entity_state      ; Forces absolute addressing mode
 
 Directives begin with a leading dot (`.`) and provide instructions to the assembler.
 
-### 4.1 Bank Selection Directive (MMC3 8KB Granularity)
+### 4.1 Bank & Memory Segment Directives
 
-The `.bank` directive informs the assembler which 8KB bank the following symbols and code belong to:
+The assembler manages RAM segments and switchable MMC3 PRG-ROM banks:
+
+#### `.bank`
+Informs the assembler which 8KB bank the following symbols and code belong to:
 
 ```assembly
 .bank <bank_index>
 .bank auto
 ```
 
-- `<bank_index>`: An integer expression specifying the 8KB PRG bank number (e.g., `0` to `63` depending on ROM size).
-- `auto`: Flags the symbols and code defined in this file to be placed automatically into an available 8KB PRG bank at link time. All `.bank auto` symbols and code within a single assembly file are guaranteed to be placed within the same bank at link time.
-- All labels and data defined after a `.bank` directive will inherit that bank context.
+- `<bank_index>`: An integer expression specifying the 8KB PRG bank number (`0` to `63`).
+- `auto`: Flags the symbols and code defined in this file to be placed automatically into an available 8KB PRG bank at link time. All `.bank auto` symbols and code within a single assembly file are placed within the same bank at link time.
+- All labels and data defined after a `.bank` directive inherit that bank context.
 - The bank index is accessible via the `^` byte operator on symbols defined in that bank.
+
+#### `.data`
+Switches the active PRG segment to **Banked Data**.
+- All labels and assets defined under `.data` have their addresses relocated to the dedicated **Data Bank window (`$8000-$9FFF`)**.
+
+#### `.code` / `.prg`
+Switches the active PRG segment to **Code / Procedures / Constants**.
+- All labels, procedures, and constants defined under `.code` in switchable PRG banks (0–61, auto) have their addresses relocated to the dedicated **Code Swap Bank window (`$A000-$BFFF`)**.
+- Symbols defined in Bank 62 relocate to `$C000-$DFFF`, and Bank 63 relocate to `$E000-$FFFF`.
+
+#### `.zp` / `.zeropage`, `.ram` / `.bss`, `.wram`
+Switches the active segment to Zero Page (`$0000-$00FF`), internal RAM (`$0300-$07FF`), or MMC3 Work RAM (`$6000-$7FFF`).
 
 Example:
 ```assembly
 .bank 0
+.data
 dialog_table:
-    .asciiz "Welcome to the world of m3!"
+    .asciiz "Welcome to the world of m3!" ; Relocated to $8000
 
-.bank auto
-compressed_level_data:
-    .incbin "assets/level1.bin"
-
-.bank 1
-music_track_0:
-    .incbin "assets/track0.bin"
+.bank 0
+.code
+main:
+    LDA #<dialog_table                  ; Address in $8000-$9FFF
+    RTS                                 ; main relocated to $A000
 
 .bank 63 ; Fixed bank in MMC3 ($E000-$FFFF)
+.code
 reset_handler:
     SEI
     CLD
