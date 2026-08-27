@@ -19,7 +19,7 @@
 .export oam_advance_flicker, _oam_advance_flicker, oam_flicker, _oam_flicker
 .export oam_spr, _oam_spr, oam_put_sprite, _oam_put_sprite
 .export oam_off, _oam_off, oam_flicker_offset, _oam_flicker_offset, oam_spr_attr, _oam_spr_attr
-.import _main
+.import _main, _main_main
 .import _nmi
 .import _irq
 
@@ -111,10 +111,10 @@ reset_handler:
     LDA #$00
     STA MMC3_BANK_DATA
 
-    ; PRG R7 ($A000-$BFFF) -> Bank 1
+    ; PRG R7 ($A000-$BFFF) -> Main function code bank
     LDA #$07
     STA MMC3_BANK_SELECT
-    LDA #$01
+    LDA #^_main_main
     STA MMC3_BANK_DATA
 
     ; CHR Banking (1:1 8KB CHR-RAM mapping)
@@ -162,6 +162,12 @@ reset_handler:
 
     ; Initialize OAM buffer so sprites start hidden offscreen
     JSR oam_clear
+
+    ; Switch PRG R7 ($A000-$BFFF) to bank containing main function
+    LDA #$07
+    STA MMC3_BANK_SELECT
+    LDA #^_main_main
+    STA MMC3_BANK_DATA
 
     ; Call m3 main function
     JSR _main_main

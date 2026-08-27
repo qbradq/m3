@@ -633,6 +633,38 @@ data (
 	}
 }
 
+func TestBuildMMCLibrary(t *testing.T) {
+	tmpDir := t.TempDir()
+	src := `
+package main
+
+import (
+    "mmc.m3"
+)
+
+data level_data bank 5 = [4]uint8{10, 20, 30, 40}
+
+func main() bank 0 {
+    mmc.PushDataBank(^level_data)
+    mmc.PopDataBank()
+}
+`
+	mainPath := filepath.Join(tmpDir, "main.m3")
+	if err := os.WriteFile(mainPath, []byte(src), 0644); err != nil {
+		t.Fatalf("failed to write main.m3: %v", err)
+	}
+
+	rom, err := Build([]string{mainPath})
+	if err != nil {
+		t.Fatalf("Build with mmc.m3 failed: %v", err)
+	}
+
+	if len(rom) != 16+64*8192 {
+		t.Fatalf("expected ROM size %d, got %d", 16+64*8192, len(rom))
+	}
+}
+
+
 
 
 

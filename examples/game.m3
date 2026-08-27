@@ -1,9 +1,10 @@
 package main
 
 import (
+    "memory.m3"
+    "mmc.m3"
     "oam.m3"
     "ppu.m3"
-    "memory.m3"
 
     "./data/data.m3"
 )
@@ -66,8 +67,12 @@ func main() {
     init_enemies()
 
     // Load RAM
+    mmc.PushDataBank(^data.FontPal)
     memory.Copy(data.FontPal, &palette_buffer[0], 16)
+    mmc.PopDataBank()
+    mmc.PushDataBank(^data.SpritePal)
     memory.Copy(data.SpritePal, &palette_buffer[16], 16)
+    mmc.PopDataBank()
 
     // Initialize PPU
     ppu.Disable() 
