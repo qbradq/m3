@@ -39,11 +39,11 @@ func main() bank 0 {
 		t.Fatalf("expected AST file, got nil")
 	}
 
-	if !strings.Contains(asmOutput, "_player_x:") {
-		t.Errorf("expected assembly to contain '_player_x:', got:\n%s", asmOutput)
+	if !strings.Contains(asmOutput, "_main_player_x:") {
+		t.Errorf("expected assembly to contain '_main_player_x:', got:\n%s", asmOutput)
 	}
-	if !strings.Contains(asmOutput, ".proc _main") {
-		t.Errorf("expected assembly to contain '.proc _main', got:\n%s", asmOutput)
+	if !strings.Contains(asmOutput, ".proc _main_main") {
+		t.Errorf("expected assembly to contain '.proc _main_main', got:\n%s", asmOutput)
 	}
 	if !strings.Contains(asmOutput, "BIT $2002") {
 		t.Errorf("expected assembly to contain inline asm, got:\n%s", asmOutput)
@@ -77,8 +77,8 @@ func main() bank 0 {
 		t.Fatalf("failed to read output file: %v", err)
 	}
 
-	if !strings.Contains(string(content), "_x:") {
-		t.Errorf("output missing _x:, got:\n%s", string(content))
+	if !strings.Contains(string(content), "_main_x:") {
+		t.Errorf("output missing _main_x:, got:\n%s", string(content))
 	}
 }
 
@@ -101,15 +101,15 @@ define (
 
 	expectedSnippets := []string{
 		"; Compile-time Definitions",
-		".export _PPU_CTRL",
-		".define _PPU_CTRL $2000",
-		".export _PPU_MASK",
-		".define _PPU_MASK $2001",
-		".define _local_const 42",
-		".export _PPU_STAT",
-		".define _PPU_STAT $2002",
-		".export _CALC_VAL",
-		".define _CALC_VAL (_PPU_CTRL + 5)",
+		".export _main_PPU_CTRL",
+		".define _main_PPU_CTRL $2000",
+		".export _main_PPU_MASK",
+		".define _main_PPU_MASK $2001",
+		".define _main_local_const 42",
+		".export _main_PPU_STAT",
+		".define _main_PPU_STAT $2002",
+		".export _main_CALC_VAL",
+		".define _main_CALC_VAL (_main_PPU_CTRL + 5)",
 	}
 
 	for _, snippet := range expectedSnippets {
@@ -127,7 +127,7 @@ import "oam.m3"
 
 func main() bank 0 {
     asm {
-        JSR _Clear
+        JSR _oam_Clear
     }
 }
 `
@@ -138,10 +138,10 @@ func main() bank 0 {
 
 	// Verify that compile-time definitions from oam.m3 were imported
 	expectedSnippets := []string{
-		".define _OAM_BUFFER $0200",
-		".define _SPR_PAL0 0",
-		".proc _main",
-		"JSR _Clear",
+		".define _oam_OAM_BUFFER $0200",
+		".define _oam_SPR_PAL0 0",
+		".proc _main_main",
+		"JSR _oam_Clear",
 	}
 
 	for _, snippet := range expectedSnippets {
@@ -183,7 +183,7 @@ import "./oam.m3"
 
 func main() bank 0 {
     asm {
-        JSR _LocalHelper
+        JSR _custom_oam_LocalHelper
     }
 }
 `
@@ -193,8 +193,8 @@ func main() bank 0 {
 		t.Fatalf("compilation with relative import failed: %v", err)
 	}
 
-	if !strings.Contains(asmOutput, "_LOCAL_SPR_COUNT") {
-		t.Errorf("expected local oam.m3 definition _LOCAL_SPR_COUNT, got:\n%s", asmOutput)
+	if !strings.Contains(asmOutput, "_custom_oam_LOCAL_SPR_COUNT") {
+		t.Errorf("expected local oam.m3 definition _custom_oam_LOCAL_SPR_COUNT, got:\n%s", asmOutput)
 	}
 
 	// 3. Test relative import failure when file does not exist in local directory
@@ -287,7 +287,7 @@ define CONST_A 100
 
 func FuncA() bank auto {
     asm {
-        JSR _FuncB
+        JSR _b_FuncB
     }
 }
 
@@ -344,14 +344,14 @@ func HelperD() bank auto {
 package b
 import "./d.m3"
 func HelperB() bank auto {
-    asm { JSR _HelperD }
+    asm { JSR _d_HelperD }
 }
 `
 	cSrc := `
 package c
 import "./d.m3"
 func HelperC() bank auto {
-    asm { JSR _HelperD }
+    asm { JSR _d_HelperD }
 }
 `
 	aSrc := `
@@ -362,8 +362,8 @@ import (
 )
 func main() bank 0 {
     asm {
-        JSR _HelperB
-        JSR _HelperC
+        JSR _b_HelperB
+        JSR _c_HelperC
     }
 }
 `
@@ -417,11 +417,11 @@ const my_palette uint8[32] = [32]uint8{
 
 func main() bank 0 {
     asm {
-        JSR _Disable
-        LDA #<my_palette
-        LDX #>my_palette
-        JSR _DirectUploadPalette
-        JSR _Enable
+        JSR _ppu_Disable
+        LDA #<_main_my_palette
+        LDX #>_main_my_palette
+        JSR _ppu_DirectUploadPalette
+        JSR _ppu_Enable
     }
 }
 `
@@ -454,22 +454,22 @@ var (
 
 func main() bank 0 {
     asm {
-        LDA #<buf_src
-        STA _src_ptr
-        LDA #>buf_src
-        STA _src_ptr+1
+        LDA #<_main_buf_src
+        STA _memory_src_ptr
+        LDA #>_main_buf_src
+        STA _memory_src_ptr+1
 
-        LDA #<buf_dst
-        STA _dst_ptr
-        LDA #>buf_dst
-        STA _dst_ptr+1
+        LDA #<_main_buf_dst
+        STA _memory_dst_ptr
+        LDA #>_main_buf_dst
+        STA _memory_dst_ptr+1
 
         LDA #64
-        STA _len_cnt
+        STA _memory_len_cnt
         LDA #0
-        STA _len_cnt+1
+        STA _memory_len_cnt+1
 
-        JSR _Copy
+        JSR _memory_Copy
     }
 }
 `
@@ -517,7 +517,7 @@ func main() bank 0 {
 		".incpal \"title.png\"",
 		".incchr \"font.png\"",
 		".incbin \"data.bin\"",
-		"_fontPal:\n  .res 16",
+		"_main_fontPal:\n  .res 16",
 	}
 
 	for _, exp := range expectedDirectives {
@@ -571,8 +571,8 @@ var font_buf uint8[16] = incpal("font.png", 16)
 
 func main() bank 0 {
     asm {
-        LDA _font_pal
-        LDA _bin_data
+        LDA _main_font_pal
+        LDA _main_bin_data
     }
 }
 `

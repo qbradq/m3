@@ -71,7 +71,7 @@ func main() {
 
     // Initialize PPU
     ppu.Disable() 
-    ppu.UploadPalette(palette_buffer)
+    ppu.DirectUploadPalette(palette_buffer)
     ppu.Enable()
 
     for {

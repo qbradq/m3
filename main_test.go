@@ -162,3 +162,84 @@ func main() bank 0 {
 	}
 }
 
+func TestHandleBuildExamplesGame(t *testing.T) {
+	tmpDir := t.TempDir()
+	outFile := filepath.Join(tmpDir, "game.nes")
+
+	if err := handleBuild([]string{"examples/game.m3", "-o", outFile}); err != nil {
+		t.Fatalf("handleBuild on examples/game.m3 failed: %v", err)
+	}
+
+	stat, err := os.Stat(outFile)
+	if err != nil {
+		t.Fatalf("expected output %s was not created: %v", outFile, err)
+	}
+	if stat.Size() != 524304 {
+		t.Errorf("expected file size 524304, got %d", stat.Size())
+	}
+}
+
+func TestHandleBuildDuplicateSymbolsAcrossPackages(t *testing.T) {
+	tmpDir := t.TempDir()
+	subDir := filepath.Join(tmpDir, "pkgb")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+
+	pkgBFile := filepath.Join(subDir, "b.m3")
+	pkgBSrc := `
+package pkgb
+
+define (
+    SHARED_REG $2000
+    COUNTER_MAX 10
+)
+
+var scratch uint8 zp
+var table uint8[8] ram
+
+func Init() bank auto {
+    scratch = 0
+}
+`
+	if err := os.WriteFile(pkgBFile, []byte(pkgBSrc), 0644); err != nil {
+		t.Fatalf("failed to write b.m3: %v", err)
+	}
+
+	mainFile := filepath.Join(tmpDir, "main.m3")
+	mainSrc := `
+package main
+
+import "./pkgb/b.m3"
+
+define (
+    SHARED_REG $2000
+    COUNTER_MAX 20
+)
+
+var scratch uint8 zp
+var table uint8[8] ram
+
+func main() bank 0 {
+    scratch = 1
+}
+`
+	if err := os.WriteFile(mainFile, []byte(mainSrc), 0644); err != nil {
+		t.Fatalf("failed to write main.m3: %v", err)
+	}
+
+	outFile := filepath.Join(tmpDir, "dup_test.nes")
+	if err := handleBuild([]string{mainFile, "-o", outFile}); err != nil {
+		t.Fatalf("handleBuild failed with duplicate symbol conflict across packages: %v", err)
+	}
+
+	stat, err := os.Stat(outFile)
+	if err != nil {
+		t.Fatalf("expected output %s was not created: %v", outFile, err)
+	}
+	if stat.Size() != 524304 {
+		t.Errorf("expected file size 524304, got %d", stat.Size())
+	}
+}
+
+

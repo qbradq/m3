@@ -367,9 +367,24 @@ func (l *Linker) collectSymbols() error {
 	}
 
 	// Handle main entry point
-	mainSym, hasMain := l.globalSyms["_main"]
+	mainCandidates := []string{"_main", "main", "_main_main", "main_main"}
+	var mainSym *resolvedSymbol
+	var hasMain bool
+	for _, name := range mainCandidates {
+		if sym, ok := l.globalSyms[name]; ok {
+			mainSym = sym
+			hasMain = true
+			break
+		}
+	}
 	if !hasMain {
-		mainSym, hasMain = l.globalSyms["main"]
+		for name, sym := range l.globalSyms {
+			if strings.HasSuffix(name, "_main") {
+				mainSym = sym
+				hasMain = true
+				break
+			}
+		}
 	}
 	if l.usingMrt0 && !hasMain {
 		return fmt.Errorf("linker error: undefined symbol \"main\" (entry point required)")
@@ -384,9 +399,15 @@ func (l *Linker) collectSymbols() error {
 	}
 
 	// Handle NMI interrupt routine
-	nmiSym, hasNMI := l.globalSyms["_nmi"]
-	if !hasNMI {
-		nmiSym, hasNMI = l.globalSyms["nmi"]
+	nmiCandidates := []string{"_nmi", "nmi", "_main_nmi", "main_nmi"}
+	var nmiSym *resolvedSymbol
+	var hasNMI bool
+	for _, name := range nmiCandidates {
+		if sym, ok := l.globalSyms[name]; ok {
+			nmiSym = sym
+			hasNMI = true
+			break
+		}
 	}
 	if !hasNMI {
 		if stubSym, ok := l.globalSyms["__mrt0_stub_rts"]; ok {
@@ -403,9 +424,15 @@ func (l *Linker) collectSymbols() error {
 	}
 
 	// Handle IRQ interrupt routine
-	irqSym, hasIRQ := l.globalSyms["_irq"]
-	if !hasIRQ {
-		irqSym, hasIRQ = l.globalSyms["irq"]
+	irqCandidates := []string{"_irq", "irq", "_main_irq", "main_irq"}
+	var irqSym *resolvedSymbol
+	var hasIRQ bool
+	for _, name := range irqCandidates {
+		if sym, ok := l.globalSyms[name]; ok {
+			irqSym = sym
+			hasIRQ = true
+			break
+		}
 	}
 	if !hasIRQ {
 		if stubSym, ok := l.globalSyms["__mrt0_stub_rts"]; ok {
@@ -544,7 +571,7 @@ func (l *Linker) setupVectors() error {
 	bank63 := l.banks[NumBanks-1]
 
 	// Find Reset Vector candidate
-	resetCandidates := []string{"reset_handler", "_reset_handler", "reset", "start", "main", "_main"}
+	resetCandidates := []string{"reset_handler", "_reset_handler", "reset", "start", "main", "_main", "_main_main", "main_main"}
 	var resetSym *resolvedSymbol
 	for _, name := range resetCandidates {
 		if sym, ok := l.globalSyms[name]; ok {
@@ -552,9 +579,17 @@ func (l *Linker) setupVectors() error {
 			break
 		}
 	}
+	if resetSym == nil {
+		for name, sym := range l.globalSyms {
+			if strings.HasSuffix(name, "_main") {
+				resetSym = sym
+				break
+			}
+		}
+	}
 
 	// Find NMI Vector candidate
-	nmiCandidates := []string{"nmi_handler", "_nmi_handler", "nmi", "_nmi", "vblank_handler", "vblank"}
+	nmiCandidates := []string{"nmi_handler", "_nmi_handler", "nmi", "_nmi", "vblank_handler", "vblank", "_main_nmi", "main_nmi"}
 	var nmiSym *resolvedSymbol
 	for _, name := range nmiCandidates {
 		if sym, ok := l.globalSyms[name]; ok {
@@ -564,7 +599,7 @@ func (l *Linker) setupVectors() error {
 	}
 
 	// Find IRQ Vector candidate
-	irqCandidates := []string{"irq_handler", "_irq_handler", "irq", "_irq"}
+	irqCandidates := []string{"irq_handler", "_irq_handler", "irq", "_irq", "_main_irq", "main_irq"}
 	var irqSym *resolvedSymbol
 	for _, name := range irqCandidates {
 		if sym, ok := l.globalSyms[name]; ok {

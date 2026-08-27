@@ -316,11 +316,15 @@ func generateAssembly(file *SourceFile) (string, error) {
 	if len(defineDecls) > 0 {
 		sb.WriteString("; Compile-time Definitions\n")
 		for _, d := range defineDecls {
-			name := mangleSymbol(d.Name)
+			pkg := d.Package
+			if pkg == "" {
+				pkg = file.PackageName
+			}
+			name := mangleSymbol(pkg, d.Name)
 			if isExported(d.Name) && (d.Pos().Filename == "" || d.Pos().Filename == file.Pos().Filename) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
-			sb.WriteString(fmt.Sprintf(".define %s %s\n\n", name, formatConstExpr(d.Value)))
+			sb.WriteString(fmt.Sprintf(".define %s %s\n\n", name, formatConstExpr(d.Value, pkg)))
 		}
 	}
 
@@ -328,7 +332,11 @@ func generateAssembly(file *SourceFile) (string, error) {
 	if len(zpVars) > 0 {
 		sb.WriteString(".zp\n")
 		for _, v := range zpVars {
-			name := mangleSymbol(v.Name)
+			pkg := v.Package
+			if pkg == "" {
+				pkg = file.PackageName
+			}
+			name := mangleSymbol(pkg, v.Name)
 			if isExported(v.Name) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
@@ -342,7 +350,11 @@ func generateAssembly(file *SourceFile) (string, error) {
 	if len(ramVars) > 0 {
 		sb.WriteString(".ram\n")
 		for _, v := range ramVars {
-			name := mangleSymbol(v.Name)
+			pkg := v.Package
+			if pkg == "" {
+				pkg = file.PackageName
+			}
+			name := mangleSymbol(pkg, v.Name)
 			if isExported(v.Name) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
@@ -356,7 +368,11 @@ func generateAssembly(file *SourceFile) (string, error) {
 	if len(wramVars) > 0 {
 		sb.WriteString(".wram\n")
 		for _, v := range wramVars {
-			name := mangleSymbol(v.Name)
+			pkg := v.Package
+			if pkg == "" {
+				pkg = file.PackageName
+			}
+			name := mangleSymbol(pkg, v.Name)
 			if isExported(v.Name) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
@@ -379,7 +395,11 @@ func generateAssembly(file *SourceFile) (string, error) {
 			} else {
 				sb.WriteString(".bank auto\n")
 			}
-			name := mangleSymbol(c.Name)
+			pkg := c.Package
+			if pkg == "" {
+				pkg = file.PackageName
+			}
+			name := mangleSymbol(pkg, c.Name)
 			if isExported(c.Name) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
@@ -406,7 +426,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 				sb.WriteString(fmt.Sprintf("  .incchr %q\n", incchr.Path))
 			} else if incpal, ok := c.Value.(*IncpalExpr); ok {
 				if incpal.Count != nil {
-					sb.WriteString(fmt.Sprintf("  .incpal %q, %s\n", incpal.Path, formatConstExpr(incpal.Count)))
+					sb.WriteString(fmt.Sprintf("  .incpal %q, %s\n", incpal.Path, formatConstExpr(incpal.Count, pkg)))
 				} else {
 					sb.WriteString(fmt.Sprintf("  .incpal %q\n", incpal.Path))
 				}
@@ -429,7 +449,11 @@ func generateAssembly(file *SourceFile) (string, error) {
 				sb.WriteString(".bank auto\n")
 			}
 
-			name := mangleSymbol(f.Name)
+			pkg := f.Package
+			if pkg == "" {
+				pkg = file.PackageName
+			}
+			name := mangleSymbol(pkg, f.Name)
 			if isExported(f.Name) {
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
@@ -479,7 +503,10 @@ func emitBodyStmts(sb *strings.Builder, stmts []Stmt) {
 	}
 }
 
-func mangleSymbol(name string) string {
+func mangleSymbol(pkg, name string) string {
+	if pkg != "" {
+		return fmt.Sprintf("_%s_%s", pkg, name)
+	}
 	return "_" + name
 }
 
@@ -491,7 +518,7 @@ func isExported(name string) bool {
 	return first >= 'A' && first <= 'Z'
 }
 
-func formatConstExpr(expr Expr) string {
+func formatConstExpr(expr Expr, defaultPkg string) string {
 	if expr == nil {
 		return "0"
 	}
@@ -517,9 +544,14 @@ func formatConstExpr(expr Expr) string {
 	case *StringLit:
 		return fmt.Sprintf("%q", e.Value)
 	case *Ident:
-		return mangleSymbol(e.Name)
+		return mangleSymbol(defaultPkg, e.Name)
+	case *MemberExpr:
+		if targetIdent, ok := e.Target.(*Ident); ok {
+			return mangleSymbol(targetIdent.Name, e.Member)
+		}
+		return mangleSymbol(defaultPkg, e.Member)
 	case *ParenExpr:
-		return fmt.Sprintf("(%s)", formatConstExpr(e.Expr))
+		return fmt.Sprintf("(%s)", formatConstExpr(e.Expr, defaultPkg))
 	case *UnaryExpr:
 		opStr := e.Op.String()
 		switch e.Op {
@@ -534,7 +566,7 @@ func formatConstExpr(expr Expr) string {
 		case TokenAmp:
 			opStr = "^"
 		}
-		return opStr + formatConstExpr(e.Operand)
+		return opStr + formatConstExpr(e.Operand, defaultPkg)
 	case *BinaryExpr:
 		opStr := e.Op.String()
 		switch e.Op {
@@ -543,10 +575,10 @@ func formatConstExpr(expr Expr) string {
 		case TokenBangEq:
 			opStr = "!="
 		}
-		return fmt.Sprintf("%s %s %s", formatConstExpr(e.Left), opStr, formatConstExpr(e.Right))
+		return fmt.Sprintf("%s %s %s", formatConstExpr(e.Left, defaultPkg), opStr, formatConstExpr(e.Right, defaultPkg))
 	case *CallExpr:
 		if len(e.Args) == 1 {
-			return formatConstExpr(e.Args[0])
+			return formatConstExpr(e.Args[0], defaultPkg)
 		}
 		return "0"
 	case *IncbinExpr:
@@ -555,7 +587,7 @@ func formatConstExpr(expr Expr) string {
 		return fmt.Sprintf("incchr(%q)", e.Path)
 	case *IncpalExpr:
 		if e.Count != nil {
-			return fmt.Sprintf("incpal(%q, %s)", e.Path, formatConstExpr(e.Count))
+			return fmt.Sprintf("incpal(%q, %s)", e.Path, formatConstExpr(e.Count, defaultPkg))
 		}
 		return fmt.Sprintf("incpal(%q)", e.Path)
 	default:

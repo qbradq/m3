@@ -55,11 +55,11 @@ func Enable() {
 // immediately. Should only be called when the PPU is disabled.
 //
 // Fastcall Parameters (m3 ABI):
-//   pal: Low byte in A, High byte in X (or _pal_ptr in ZP)
+//   pal: Low byte in A, High byte in X (or _ppu_pal_ptr in ZP)
 func DirectUploadPalette(pal *uint8[32]) {
     asm {
-        STA _pal_ptr
-        STX _pal_ptr+1
+        STA _ppu_pal_ptr
+        STX _ppu_pal_ptr+1
 
         BIT $2002
         LDA #$3F
@@ -68,7 +68,7 @@ func DirectUploadPalette(pal *uint8[32]) {
         STA $2006
 
         LDY #$00
-    :   LDA (_pal_ptr), Y
+    :   LDA (_ppu_pal_ptr), Y
         STA $2007
         INY
         CPY #32
@@ -84,40 +84,40 @@ func DirectUploadPalette(pal *uint8[32]) {
 // ppu_dst. Should only be called when the PPU is disabled.
 //
 // Fastcall / Memory Parameters:
-//   src:     Source address pointer (_upload_src in ZP)
-//   ppu_dst: Target PPU VRAM address (_upload_dst in ZP)
-//   len:     Number of bytes to upload (_upload_len in ZP)
+//   src:     Source address pointer (_ppu_upload_src in ZP)
+//   ppu_dst: Target PPU VRAM address (_ppu_upload_dst in ZP)
+//   len:     Number of bytes to upload (_ppu_upload_len in ZP)
 func DirectUpload(src *uint8[], ppu_dst, len uint16) {
     asm {
         BIT $2002
-        LDA _upload_dst+1
+        LDA _ppu_upload_dst+1
         STA $2006
-        LDA _upload_dst
+        LDA _ppu_upload_dst
         STA $2006
 
         ; Check if high byte of length > 0
-        LDX _upload_len+1
+        LDX _ppu_upload_len+1
         BEQ @copy_remainder
 
         ; Stream 256-byte full pages
     @page_loop:
         LDY #$00
     @page_byte:
-        LDA (_upload_src), Y
+        LDA (_ppu_upload_src), Y
         STA $2007
         INY
         BNE @page_byte
 
-        INC _upload_src+1
+        INC _ppu_upload_src+1
         DEX
         BNE @page_loop
 
     @copy_remainder:
-        LDX _upload_len
+        LDX _ppu_upload_len
         BEQ @done
         LDY #$00
     @rem_byte:
-        LDA (_upload_src), Y
+        LDA (_ppu_upload_src), Y
         STA $2007
         INY
         DEX

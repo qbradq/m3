@@ -164,7 +164,7 @@ reset_handler:
     JSR oam_clear
 
     ; Call m3 main function
-    JSR _main
+    JSR _main_main
 
     ; Infinite loop if main returns
 :   JMP :-

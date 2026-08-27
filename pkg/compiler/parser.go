@@ -146,6 +146,31 @@ func (p *Parser) ParseSourceFile() (*SourceFile, error) {
 		return nil, p.errorResult()
 	}
 
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *VarDecl:
+			if d.Package == "" {
+				d.Package = file.PackageName
+			}
+		case *ConstDecl:
+			if d.Package == "" {
+				d.Package = file.PackageName
+			}
+		case *DefineDecl:
+			if d.Package == "" {
+				d.Package = file.PackageName
+			}
+		case *TypeDecl:
+			if d.Package == "" {
+				d.Package = file.PackageName
+			}
+		case *FuncDecl:
+			if d.Package == "" {
+				d.Package = file.PackageName
+			}
+		}
+	}
+
 	return file, nil
 }
 

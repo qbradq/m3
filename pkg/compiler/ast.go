@@ -143,6 +143,7 @@ func (i *ImportDecl) declNode()     {}
 
 // VarDecl represents a variable declaration: var name type[len] storage [= init]
 type VarDecl struct {
+	Package string
 	Name    string
 	Type    TypeSpec
 	Length  Expr // Optional array length
@@ -158,12 +159,13 @@ func (v *VarDecl) stmtNode()     {}
 // ConstDecl represents a constant or ROM data definition:
 // const identifier type[length] bank = value
 type ConstDecl struct {
-	Name   string
-	Type   TypeSpec
-	Length Expr // Optional array length
-	Bank   *BankSpec
-	Value  Expr
-	pos    Position
+	Package string
+	Name    string
+	Type    TypeSpec
+	Length  Expr // Optional array length
+	Bank    *BankSpec
+	Value   Expr
+	pos     Position
 }
 
 func (c *ConstDecl) Pos() Position { return c.pos }
@@ -172,9 +174,10 @@ func (c *ConstDecl) stmtNode()     {}
 
 // DefineDecl represents a compile-time constant definition: define identifier const_expr
 type DefineDecl struct {
-	Name  string
-	Value Expr
-	pos   Position
+	Package string
+	Name    string
+	Value   Expr
+	pos     Position
 }
 
 func (d *DefineDecl) Pos() Position { return d.pos }
@@ -183,9 +186,10 @@ func (d *DefineDecl) stmtNode()     {}
 
 // TypeDecl represents a type definition: type Actor struct { ... }
 type TypeDecl struct {
-	Name string
-	Type TypeSpec
-	pos  Position
+	Package string
+	Name    string
+	Type    TypeSpec
+	pos     Position
 }
 
 func (t *TypeDecl) Pos() Position { return t.pos }
@@ -202,6 +206,7 @@ func (p *Param) Pos() Position { return p.pos }
 
 // FuncDecl represents a function definition.
 type FuncDecl struct {
+	Package    string
 	Name       string
 	Params     []*Param
 	ReturnType TypeSpec // nil if void
