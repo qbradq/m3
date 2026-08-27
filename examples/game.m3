@@ -78,10 +78,10 @@ func main() {
     ppu.Disable() 
     ppu.DirectUploadPalette(palette_buffer)
     mmc.PushDataBank(^data.FontChr)
-    ppu.DirectUpload(data.FontChr, $0000)
+    ppu.DirectUpload(data.FontChr, $0000, 4096)
     mmc.PopDataBank()
     mmc.PushDataBank(^data.SpriteChr)
-    ppu.DirectUpload(data.SpriteChr, $1000)
+    ppu.DirectUpload(data.SpriteChr, $1000, 4096)
     mmc.PopDataBank()
     ppu.Enable()
 

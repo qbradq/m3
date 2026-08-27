@@ -510,12 +510,12 @@ func TestParseDataDecl(t *testing.T) {
 	src := `
 package testdata
 
-data title_image bank 2 = incbin("title.bin")
+data title_image uint8[] bank 2 = incbin("title.bin")
 
 data (
-    FontPal = incpal("font.png", 16)
-    FontChr bank 3 = incchr("font.png")
-    CustomTable = [4]uint8{1, 2, 3, 4}
+    FontPal uint8[16] = incpal("font.png", 16)
+    FontChr uint8[] bank 3 = incchr("font.png")
+    CustomTable [4]uint8 = [4]uint8{1, 2, 3, 4}
 )
 `
 	lexer := NewLexer("test.m3", src)
@@ -534,6 +534,9 @@ data (
 	if !ok || d1.Name != "title_image" {
 		t.Fatalf("expected DataDecl title_image, got %+v", file.Decls[0])
 	}
+	if d1.Type == nil || d1.Type.String() != "uint8[]" {
+		t.Errorf("expected Type uint8[], got %v", d1.Type)
+	}
 	if d1.Bank == nil || d1.Bank.Value.(*NumberLit).Value != 2 {
 		t.Errorf("expected bank 2, got %+v", d1.Bank)
 	}
@@ -545,6 +548,12 @@ data (
 	if !ok || d2.Name != "FontPal" {
 		t.Fatalf("expected DataDecl FontPal, got %+v", file.Decls[1])
 	}
+	if arr, ok := d2.Type.(*ArrayType); !ok || arr.Elem.(*NamedType).Name != "uint8" {
+		t.Errorf("expected ArrayType with uint8 elem, got %v", d2.Type)
+	}
+	if d2.Length == nil || d2.Length.(*NumberLit).Value != 16 {
+		t.Errorf("expected length 16, got %+v", d2.Length)
+	}
 	if d2.Bank != nil {
 		t.Errorf("expected nil bank for FontPal, got %+v", d2.Bank)
 	}
@@ -553,6 +562,9 @@ data (
 	if !ok || d3.Name != "FontChr" {
 		t.Fatalf("expected DataDecl FontChr, got %+v", file.Decls[2])
 	}
+	if d3.Type == nil || d3.Type.String() != "uint8[]" {
+		t.Errorf("expected Type uint8[], got %v", d3.Type)
+	}
 	if d3.Bank == nil || d3.Bank.Value.(*NumberLit).Value != 3 {
 		t.Errorf("expected bank 3 for FontChr, got %+v", d3.Bank)
 	}
@@ -560,6 +572,12 @@ data (
 	d4, ok := file.Decls[3].(*DataDecl)
 	if !ok || d4.Name != "CustomTable" {
 		t.Fatalf("expected DataDecl CustomTable, got %+v", file.Decls[3])
+	}
+	if arr, ok := d4.Type.(*ArrayType); !ok || arr.Elem.(*NamedType).Name != "uint8" {
+		t.Errorf("expected ArrayType with uint8 elem, got %v", d4.Type)
+	}
+	if d4.Length == nil || d4.Length.(*NumberLit).Value != 4 {
+		t.Errorf("expected length 4, got %+v", d4.Length)
 	}
 	if arr, ok := d4.Value.(*ArrayLit); !ok || len(arr.Elements) != 4 {
 		t.Errorf("expected 4-element ArrayLit, got %+v", d4.Value)
@@ -585,7 +603,7 @@ bank 1
 func FuncIn1() {
 }
 
-data DataIn1 = incbin("tiles.bin")
+data DataIn1 uint8[] = incbin("tiles.bin")
 
 bank auto
 

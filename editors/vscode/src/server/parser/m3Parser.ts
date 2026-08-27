@@ -55,7 +55,7 @@ export function parseM3Document(text: string, docUri?: string): ParsedM3Document
   let inBlockComment = false;
   let blockCommentBuffer: string[] = [];
 
-  let inGroupBlock: 'var' | 'const' | 'define' | 'import' | null = null;
+  let inGroupBlock: 'var' | 'const' | 'define' | 'import' | 'data' | null = null;
   let inStructDef: { symbol: M3Symbol } | null = null;
   let inAsmBlock = false;
 
@@ -206,6 +206,37 @@ export function parseM3Document(text: string, docUri?: string): ParsedM3Document
     }
     if (/^import\s*\($/.test(codeLine)) {
       inGroupBlock = 'import';
+      pendingDocComment = [];
+      continue;
+    }
+    if (/^data\s*\($/.test(codeLine)) {
+      inGroupBlock = 'data';
+      pendingDocComment = [];
+      continue;
+    }
+
+    // Inside grouped data ( ... )
+    if (inGroupBlock === 'data') {
+      const dataMatch = codeLine.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])?))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
+      if (dataMatch) {
+        const dataName = dataMatch[1];
+        const dataType = dataMatch[2] || '';
+        const dataBank = dataMatch[3];
+        const dataVal = dataMatch[4];
+        const sym: M3Symbol = {
+          name: dataName,
+          kind: SymbolKind.Constant,
+          detail: `data ${dataName}${dataType ? ' ' + dataType : ''}${dataBank ? ' bank ' + dataBank : ''}${dataVal ? ' = ' + dataVal : ''}`,
+          type: dataType,
+          bank: dataBank,
+          value: dataVal,
+          docComment: docStr,
+          line: lineIndex,
+          column: rawLine.indexOf(dataName),
+          packageName: packageName,
+        };
+        symbols.set(dataName, sym);
+      }
       pendingDocComment = [];
       continue;
     }
@@ -400,6 +431,30 @@ export function parseM3Document(text: string, docUri?: string): ParsedM3Document
         packageName: packageName,
       };
       symbols.set(constName, sym);
+      pendingDocComment = [];
+      continue;
+    }
+
+    // Single-line data declaration: data <name> <type>[length] [bank <n>] = <val>
+    const singleDataMatch = codeLine.match(/^data\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])?))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
+    if (singleDataMatch) {
+      const dataName = singleDataMatch[1];
+      const dataType = singleDataMatch[2] || '';
+      const dataBank = singleDataMatch[3];
+      const dataVal = singleDataMatch[4];
+      const sym: M3Symbol = {
+        name: dataName,
+        kind: SymbolKind.Constant,
+        detail: `data ${dataName}${dataType ? ' ' + dataType : ''}${dataBank ? ' bank ' + dataBank : ''}${dataVal ? ' = ' + dataVal : ''}`,
+        type: dataType,
+        bank: dataBank,
+        value: dataVal,
+        docComment: docStr,
+        line: lineIndex,
+        column: rawLine.indexOf(dataName),
+        packageName: packageName,
+      };
+      symbols.set(dataName, sym);
       pendingDocComment = [];
       continue;
     }

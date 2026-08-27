@@ -182,10 +182,12 @@ func (c *ConstDecl) declNode()     {}
 func (c *ConstDecl) stmtNode()     {}
 
 // DataDecl represents a banked ROM data definition:
-// data identifier [bank n] = data_expr
+// data identifier type[n] [bank n] = data_expr
 type DataDecl struct {
 	Package string
 	Name    string
+	Type    TypeSpec
+	Length  Expr // Optional array length
 	Bank    *BankSpec
 	Value   Expr
 	pos     Position
@@ -272,6 +274,15 @@ type ConstDeclStmt struct {
 
 func (c *ConstDeclStmt) Pos() Position { return c.pos }
 func (c *ConstDeclStmt) stmtNode()     {}
+
+// DataDeclStmt wraps a DataDecl as a statement inside functions.
+type DataDeclStmt struct {
+	Decl *DataDecl
+	pos  Position
+}
+
+func (d *DataDeclStmt) Pos() Position { return d.pos }
+func (d *DataDeclStmt) stmtNode()     {}
 
 // DefineDeclStmt wraps a DefineDecl as a statement inside functions.
 type DefineDeclStmt struct {

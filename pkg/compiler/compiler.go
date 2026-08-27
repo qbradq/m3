@@ -75,7 +75,7 @@ func ResolveImport(currentFile, importPath string) ([]byte, string, error) {
 	return nil, "", fmt.Errorf("cannot find imported library %q in pkg/data/lib or relative paths", importPath)
 }
 
-func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[string]bool) error {
+func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[string]bool, funcMap map[string]*FuncDecl) error {
 	for _, imp := range file.Imports {
 		content, resolvedPath, err := ResolveImport(currentFile, imp.Path)
 		if err != nil {
@@ -93,17 +93,28 @@ func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[st
 			return fmt.Errorf("failed to parse import %q (%s): %w", imp.Path, resolvedPath, err)
 		}
 
-		if err := resolveAndMergeImports(impAST, resolvedPath, visited); err != nil {
+		if err := resolveAndMergeImports(impAST, resolvedPath, visited, funcMap); err != nil {
 			return err
 		}
 
-		// Merge compile-time definitions and types from the imported AST into the current file
+		// Merge compile-time definitions, types, and function signatures from the imported AST into the current file
 		for _, decl := range impAST.Decls {
 			switch d := decl.(type) {
 			case *DefineDecl:
 				file.Decls = append(file.Decls, d)
 			case *TypeDecl:
 				file.Decls = append(file.Decls, d)
+			case *FuncDecl:
+				pkg := d.Package
+				if pkg == "" {
+					pkg = impAST.PackageName
+				}
+				if pkg != "" {
+					funcMap[pkg+"."+d.Name] = d
+				}
+				if pkg == file.PackageName {
+					funcMap[d.Name] = d
+				}
 			}
 		}
 	}
@@ -261,7 +272,25 @@ func Compile(filename, source string) (*SourceFile, string, error) {
 		visited[filename] = true
 	}
 
-	if err := resolveAndMergeImports(astFile, filename, visited); err != nil {
+	funcMap := make(map[string]*FuncDecl)
+	if err := resolveAndMergeImports(astFile, filename, visited, funcMap); err != nil {
+		return astFile, "", err
+	}
+
+	for _, decl := range astFile.Decls {
+		if fn, ok := decl.(*FuncDecl); ok {
+			pkg := fn.Package
+			if pkg == "" {
+				pkg = astFile.PackageName
+			}
+			if pkg != "" {
+				funcMap[pkg+"."+fn.Name] = fn
+			}
+			funcMap[fn.Name] = fn
+		}
+	}
+
+	if err := validateAST(astFile, funcMap); err != nil {
 		return astFile, "", err
 	}
 
@@ -271,6 +300,239 @@ func Compile(filename, source string) (*SourceFile, string, error) {
 	}
 
 	return astFile, asmCode, nil
+}
+
+func isPrimitiveType(name string) bool {
+	switch name {
+	case "uint8", "uint16", "uint32", "int8", "int16", "int32", "bool", "byte", "word":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateAST(file *SourceFile, funcMap map[string]*FuncDecl) error {
+	var walkExpr func(e Expr) error
+	var walkStmt func(s Stmt) error
+
+	walkExpr = func(e Expr) error {
+		if e == nil {
+			return nil
+		}
+		switch node := e.(type) {
+		case *CallExpr:
+			if err := checkCallExpr(node, file.PackageName, funcMap); err != nil {
+				return err
+			}
+			if err := walkExpr(node.Func); err != nil {
+				return err
+			}
+			for _, arg := range node.Args {
+				if err := walkExpr(arg); err != nil {
+					return err
+				}
+			}
+		case *ArrayLit:
+			if err := walkExpr(node.Length); err != nil {
+				return err
+			}
+			for _, el := range node.Elements {
+				if err := walkExpr(el); err != nil {
+					return err
+				}
+			}
+		case *UnaryExpr:
+			return walkExpr(node.Operand)
+		case *BinaryExpr:
+			if err := walkExpr(node.Left); err != nil {
+				return err
+			}
+			return walkExpr(node.Right)
+		case *ParenExpr:
+			return walkExpr(node.Expr)
+		case *IndexExpr:
+			if err := walkExpr(node.Array); err != nil {
+				return err
+			}
+			return walkExpr(node.Index)
+		case *MemberExpr:
+			return walkExpr(node.Target)
+		case *IncpalExpr:
+			return walkExpr(node.Count)
+		}
+		return nil
+	}
+
+	walkStmt = func(s Stmt) error {
+		if s == nil {
+			return nil
+		}
+		switch node := s.(type) {
+		case *BlockStmt:
+			for _, inner := range node.Stmts {
+				if err := walkStmt(inner); err != nil {
+					return err
+				}
+			}
+		case *VarDeclStmt:
+			if err := walkExpr(node.Decl.Length); err != nil {
+				return err
+			}
+			return walkExpr(node.Decl.Init)
+		case *ConstDeclStmt:
+			if err := walkExpr(node.Decl.Length); err != nil {
+				return err
+			}
+			return walkExpr(node.Decl.Value)
+		case *DataDeclStmt:
+			if err := walkExpr(node.Decl.Length); err != nil {
+				return err
+			}
+			return walkExpr(node.Decl.Value)
+		case *DefineDeclStmt:
+			return walkExpr(node.Decl.Value)
+		case *AssignStmt:
+			if err := walkExpr(node.Left); err != nil {
+				return err
+			}
+			return walkExpr(node.Right)
+		case *IncDecStmt:
+			return walkExpr(node.Expr)
+		case *ShortVarDeclStmt:
+			return walkExpr(node.Value)
+		case *IfStmt:
+			if err := walkStmt(node.Init); err != nil {
+				return err
+			}
+			if err := walkExpr(node.Cond); err != nil {
+				return err
+			}
+			if err := walkStmt(node.Then); err != nil {
+				return err
+			}
+			return walkStmt(node.Else)
+		case *ForStmt:
+			if err := walkStmt(node.Init); err != nil {
+				return err
+			}
+			if err := walkExpr(node.Cond); err != nil {
+				return err
+			}
+			if err := walkStmt(node.Post); err != nil {
+				return err
+			}
+			return walkStmt(node.Body)
+		case *SwitchStmt:
+			if err := walkExpr(node.Expr); err != nil {
+				return err
+			}
+			for _, cc := range node.Cases {
+				for _, val := range cc.Values {
+					if err := walkExpr(val); err != nil {
+						return err
+					}
+				}
+				for _, inner := range cc.Body {
+					if err := walkStmt(inner); err != nil {
+						return err
+					}
+				}
+			}
+		case *ReturnStmt:
+			return walkExpr(node.Value)
+		case *ExprStmt:
+			return walkExpr(node.Expr)
+		}
+		return nil
+	}
+
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *VarDecl:
+			if err := walkExpr(d.Length); err != nil {
+				return err
+			}
+			if err := walkExpr(d.Init); err != nil {
+				return err
+			}
+		case *ConstDecl:
+			if err := walkExpr(d.Length); err != nil {
+				return err
+			}
+			if err := walkExpr(d.Value); err != nil {
+				return err
+			}
+		case *DataDecl:
+			if err := walkExpr(d.Length); err != nil {
+				return err
+			}
+			if err := walkExpr(d.Value); err != nil {
+				return err
+			}
+		case *DefineDecl:
+			if err := walkExpr(d.Value); err != nil {
+				return err
+			}
+		case *FuncDecl:
+			if d.Body != nil {
+				if err := walkStmt(d.Body); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func checkCallExpr(call *CallExpr, defaultPkg string, funcMap map[string]*FuncDecl) error {
+	var funcPkg string
+	var funcName string
+	var fullName string
+
+	if ident, ok := call.Func.(*Ident); ok {
+		if isPrimitiveType(ident.Name) {
+			if len(call.Args) != 1 {
+				return fmt.Errorf("%s:%d:%d: type conversion to %s requires exactly 1 argument, got %d",
+					call.Pos().Filename, call.Pos().Line, call.Pos().Column, ident.Name, len(call.Args))
+			}
+			return nil
+		}
+		funcPkg = defaultPkg
+		funcName = ident.Name
+		fullName = ident.Name
+	} else if mem, ok := call.Func.(*MemberExpr); ok {
+		if targetIdent, ok := mem.Target.(*Ident); ok {
+			funcPkg = targetIdent.Name
+			funcName = mem.Member
+			fullName = fmt.Sprintf("%s.%s", funcPkg, funcName)
+		}
+	}
+
+	if funcName != "" {
+		var targetFn *FuncDecl
+		if funcPkg != "" {
+			targetFn = funcMap[funcPkg+"."+funcName]
+		}
+		if targetFn == nil {
+			targetFn = funcMap[funcName]
+		}
+
+		if targetFn != nil {
+			expected := len(targetFn.Params)
+			actual := len(call.Args)
+			if actual < expected {
+				return fmt.Errorf("%s:%d:%d: too few arguments in call to %s (expected %d, got %d)",
+					call.Pos().Filename, call.Pos().Line, call.Pos().Column, fullName, expected, actual)
+			}
+			if actual > expected {
+				return fmt.Errorf("%s:%d:%d: too many arguments in call to %s (expected %d, got %d)",
+					call.Pos().Filename, call.Pos().Line, call.Pos().Column, fullName, expected, actual)
+			}
+		}
+	}
+
+	return nil
 }
 
 // CompileFile reads an input .m3 file, compiles it, and writes the assembly output to outputFile.

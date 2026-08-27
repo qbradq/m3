@@ -283,15 +283,16 @@ When the HLL accesses `data` definitions, it switches the active PRG bank in the
 
 ```go
 // Single declaration
-data identifier [bank n] = data_expr
+data identifier type[n] [bank n] = data_expr
 
 // Grouped declaration
 data (
-    identifier1 [bank n1] = data_expr1
-    identifier2 [bank n2] = data_expr2
+    identifier1 type1[n1] [bank n1] = data_expr1
+    identifier2 type2[n2] [bank n2] = data_expr2
 )
 ```
 
+- **`type[n]`**: Specifies the element type and optional array length (e.g. `uint8[16]`, `uint8[]`, `string[]`).
 - **`bank` (optional)**: Specifies explicit PRG-ROM bank (`0`–`63`) or `bank auto` (default).
 - **`data_expr`**: An array literal (e.g. `[16]uint8{...}`), string literal, or data inclusion expression (`incbin(...)`, `incchr(...)`, `incpal(...)`).
 - **Address Relocation**: All `data` symbols relocate to the `$8000-$9FFF` range.
@@ -303,10 +304,10 @@ package assets
 
 // Banked graphical and sound assets
 data (
-    TitleChr  bank 1 = incchr("title.png")
-    TitlePal  bank 1 = incpal("title.png")
-    WorldMap  bank 2 = incbin("world.bin")
-    FontChr   = incchr("font.png")
+    TitleChr  uint8[]   bank 1 = incchr("title.png")
+    TitlePal  uint8[16] bank 1 = incpal("title.png")
+    WorldMap  uint8[]   bank 2 = incbin("world.bin")
+    FontChr   uint8[]          = incchr("font.png")
 )
 ```
 

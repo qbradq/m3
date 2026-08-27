@@ -595,12 +595,12 @@ func TestCompileDataDeclarations(t *testing.T) {
 	src := `
 package testpkg
 
-data title_image bank 2 = incbin("title.bin")
+data title_image uint8[] bank 2 = incbin("title.bin")
 
 data (
-    FontPal = incpal("font.png", 16)
-    FontChr bank 3 = incchr("font.png")
-    CustomTable = [4]uint8{1, 2, 3, 4}
+    FontPal uint8[16] = incpal("font.png", 16)
+    FontChr uint8[] bank 3 = incchr("font.png")
+    CustomTable [4]uint8 = [4]uint8{1, 2, 3, 4}
 )
 `
 	_, asmOutput, err := Compile("test.m3", src)
@@ -878,3 +878,79 @@ func FuncC() {
 		}
 	}
 }
+
+func TestCallArgCountValidation_PPU_DirectUpload_TooFew(t *testing.T) {
+	src := `
+package main
+
+import "ppu.m3"
+
+func main() bank 0 {
+    ppu.DirectUpload(nil, $0000)
+}
+`
+	_, _, err := Compile("test.m3", src)
+	if err == nil {
+		t.Fatal("expected compilation error for too few arguments to ppu.DirectUpload, got nil")
+	}
+	if !strings.Contains(err.Error(), "too few arguments in call to ppu.DirectUpload (expected 3, got 2)") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestCallArgCountValidation_PPU_DirectUpload_TooMany(t *testing.T) {
+	src := `
+package main
+
+import "ppu.m3"
+
+func main() bank 0 {
+    ppu.DirectUpload(nil, $0000, 4096, 10)
+}
+`
+	_, _, err := Compile("test.m3", src)
+	if err == nil {
+		t.Fatal("expected compilation error for too many arguments to ppu.DirectUpload, got nil")
+	}
+	if !strings.Contains(err.Error(), "too many arguments in call to ppu.DirectUpload (expected 3, got 4)") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestCallArgCountValidation_LocalFunc(t *testing.T) {
+	src := `
+package main
+
+func add(a, b uint8) {
+}
+
+func main() bank 0 {
+    add(1)
+}
+`
+	_, _, err := Compile("test.m3", src)
+	if err == nil {
+		t.Fatal("expected compilation error for too few arguments to add, got nil")
+	}
+	if !strings.Contains(err.Error(), "too few arguments in call to add (expected 2, got 1)") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestCallArgCountValidation_TypeCast(t *testing.T) {
+	src := `
+package main
+
+func main() bank 0 {
+    _ = uint8(1, 2)
+}
+`
+	_, _, err := Compile("test.m3", src)
+	if err == nil {
+		t.Fatal("expected compilation error for invalid type cast argument count, got nil")
+	}
+	if !strings.Contains(err.Error(), "type conversion to uint8 requires exactly 1 argument, got 2") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+

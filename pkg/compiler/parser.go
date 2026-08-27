@@ -457,9 +457,19 @@ func (p *Parser) parseSingleDataDecl() (*DataDecl, error) {
 	name := p.curToken.Literal
 	p.nextToken()
 
+	// Type specification (e.g. type[n], type[], etc.)
+	var typeSpec TypeSpec
+	var lengthExpr Expr
+	var err error
+	if !p.curTokenIs(TokenBank) && !p.curTokenIs(TokenEq) {
+		typeSpec, lengthExpr, err = p.parseTypeAndOptionalLength()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Bank specifier (optional: bank <n> / bank auto)
 	var bankSpec *BankSpec
-	var err error
 	if p.curTokenIs(TokenBank) {
 		bankSpec, err = p.parseBankSpec()
 		if err != nil {
@@ -479,10 +489,12 @@ func (p *Parser) parseSingleDataDecl() (*DataDecl, error) {
 	}
 
 	return &DataDecl{
-		Name:  name,
-		Bank:  bankSpec,
-		Value: valueExpr,
-		pos:   pos,
+		Name:   name,
+		Type:   typeSpec,
+		Length: lengthExpr,
+		Bank:   bankSpec,
+		Value:  valueExpr,
+		pos:    pos,
 	}, nil
 }
 
@@ -913,6 +925,20 @@ func (p *Parser) parseStatement() (Stmt, error) {
 		var stmts []Stmt
 		for _, d := range decls {
 			stmts = append(stmts, &DefineDeclStmt{Decl: d, pos: d.Pos()})
+		}
+		return &BlockStmt{Stmts: stmts, pos: pos}, nil
+
+	case TokenData:
+		decls, err := p.parseDataDecl()
+		if err != nil {
+			return nil, err
+		}
+		if len(decls) == 1 {
+			return &DataDeclStmt{Decl: decls[0], pos: pos}, nil
+		}
+		var stmts []Stmt
+		for _, d := range decls {
+			stmts = append(stmts, &DataDeclStmt{Decl: d, pos: d.Pos()})
 		}
 		return &BlockStmt{Stmts: stmts, pos: pos}, nil
 
