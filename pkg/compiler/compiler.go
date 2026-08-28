@@ -75,7 +75,7 @@ func ResolveImport(currentFile, importPath string) ([]byte, string, error) {
 	return nil, "", fmt.Errorf("cannot find imported library %q in pkg/data/lib or relative paths", importPath)
 }
 
-func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[string]bool, funcMap map[string]*FuncDecl) error {
+func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[string]bool, funcMap map[string]*FuncDecl, declMap map[string]Decl) error {
 	for _, imp := range file.Imports {
 		content, resolvedPath, err := ResolveImport(currentFile, imp.Path)
 		if err != nil {
@@ -93,7 +93,7 @@ func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[st
 			return fmt.Errorf("failed to parse import %q (%s): %w", imp.Path, resolvedPath, err)
 		}
 
-		if err := resolveAndMergeImports(impAST, resolvedPath, visited, funcMap); err != nil {
+		if err := resolveAndMergeImports(impAST, resolvedPath, visited, funcMap, declMap); err != nil {
 			return err
 		}
 
@@ -102,8 +102,51 @@ func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[st
 			switch d := decl.(type) {
 			case *DefineDecl:
 				file.Decls = append(file.Decls, d)
+				pkg := d.Package
+				if pkg == "" {
+					pkg = impAST.PackageName
+				}
+				if pkg != "" && declMap != nil {
+					declMap[pkg+"."+d.Name] = d
+				}
+				if pkg == file.PackageName && declMap != nil {
+					declMap[d.Name] = d
+				}
 			case *TypeDecl:
 				file.Decls = append(file.Decls, d)
+			case *DataDecl:
+				pkg := d.Package
+				if pkg == "" {
+					pkg = impAST.PackageName
+				}
+				if pkg != "" && declMap != nil {
+					declMap[pkg+"."+d.Name] = d
+				}
+				if pkg == file.PackageName && declMap != nil {
+					declMap[d.Name] = d
+				}
+			case *ConstDecl:
+				pkg := d.Package
+				if pkg == "" {
+					pkg = impAST.PackageName
+				}
+				if pkg != "" && declMap != nil {
+					declMap[pkg+"."+d.Name] = d
+				}
+				if pkg == file.PackageName && declMap != nil {
+					declMap[d.Name] = d
+				}
+			case *VarDecl:
+				pkg := d.Package
+				if pkg == "" {
+					pkg = impAST.PackageName
+				}
+				if pkg != "" && declMap != nil {
+					declMap[pkg+"."+d.Name] = d
+				}
+				if pkg == file.PackageName && declMap != nil {
+					declMap[d.Name] = d
+				}
 			case *FuncDecl:
 				pkg := d.Package
 				if pkg == "" {
@@ -273,20 +316,42 @@ func Compile(filename, source string) (*SourceFile, string, error) {
 	}
 
 	funcMap := make(map[string]*FuncDecl)
-	if err := resolveAndMergeImports(astFile, filename, visited, funcMap); err != nil {
+	declMap := make(map[string]Decl)
+	if err := resolveAndMergeImports(astFile, filename, visited, funcMap, declMap); err != nil {
 		return astFile, "", err
 	}
 
 	for _, decl := range astFile.Decls {
-		if fn, ok := decl.(*FuncDecl); ok {
-			pkg := fn.Package
+		switch d := decl.(type) {
+		case *FuncDecl:
+			pkg := d.Package
 			if pkg == "" {
 				pkg = astFile.PackageName
 			}
 			if pkg != "" {
-				funcMap[pkg+"."+fn.Name] = fn
+				funcMap[pkg+"."+d.Name] = d
 			}
-			funcMap[fn.Name] = fn
+			funcMap[d.Name] = d
+		case *DataDecl:
+			declMap[d.Name] = d
+			if astFile.PackageName != "" {
+				declMap[astFile.PackageName+"."+d.Name] = d
+			}
+		case *ConstDecl:
+			declMap[d.Name] = d
+			if astFile.PackageName != "" {
+				declMap[astFile.PackageName+"."+d.Name] = d
+			}
+		case *VarDecl:
+			declMap[d.Name] = d
+			if astFile.PackageName != "" {
+				declMap[astFile.PackageName+"."+d.Name] = d
+			}
+		case *DefineDecl:
+			declMap[d.Name] = d
+			if astFile.PackageName != "" {
+				declMap[astFile.PackageName+"."+d.Name] = d
+			}
 		}
 	}
 
@@ -294,7 +359,7 @@ func Compile(filename, source string) (*SourceFile, string, error) {
 		return astFile, "", err
 	}
 
-	asmCode, err := generateAssembly(astFile, funcMap)
+	asmCode, err := generateAssembly(astFile, funcMap, declMap)
 	if err != nil {
 		return astFile, "", err
 	}
@@ -761,7 +826,7 @@ func computeParamLocations(f *FuncDecl, defaultPkg string) []ParamLocation {
 }
 
 // generateAssembly generates assembly source from the AST.
-func generateAssembly(file *SourceFile, funcMap map[string]*FuncDecl) (string, error) {
+func generateAssembly(file *SourceFile, funcMap map[string]*FuncDecl, declMap map[string]Decl) (string, error) {
 	var sb strings.Builder
 
 	sb.WriteString("; =============================================================================\n")
@@ -906,13 +971,19 @@ func generateAssembly(file *SourceFile, funcMap map[string]*FuncDecl) (string, e
 			}
 			emitBank(&sb, d.Bank, pkg)
 			sb.WriteString(".data\n")
-			name := mangleSymbol(pkg, d.Name)
-			if isExported(d.Name) {
-				sb.WriteString(fmt.Sprintf(".export %s\n", name))
-			}
-			sb.WriteString(fmt.Sprintf("%s:\n", name))
-			if err := emitConstDataDeclValue(&sb, d.Value, d.Type, structMap, pkg); err != nil {
-				return "", err
+			if is2DDecl(d.Type, d.Value) {
+				if err := emit2DDataOrConstDecl(&sb, d.Name, pkg, isExported(d.Name), d.Type, d.Length, d.Value, structMap); err != nil {
+					return "", err
+				}
+			} else {
+				name := mangleSymbol(pkg, d.Name)
+				if isExported(d.Name) {
+					sb.WriteString(fmt.Sprintf(".export %s\n", name))
+				}
+				sb.WriteString(fmt.Sprintf("%s:\n", name))
+				if err := emitConstDataDeclValue(&sb, d.Value, d.Type, structMap, pkg); err != nil {
+					return "", err
+				}
 			}
 			sb.WriteString("\n")
 		}
@@ -928,13 +999,19 @@ func generateAssembly(file *SourceFile, funcMap map[string]*FuncDecl) (string, e
 			}
 			emitBank(&sb, c.Bank, pkg)
 			sb.WriteString(".code\n")
-			name := mangleSymbol(pkg, c.Name)
-			if isExported(c.Name) {
-				sb.WriteString(fmt.Sprintf(".export %s\n", name))
-			}
-			sb.WriteString(fmt.Sprintf("%s:\n", name))
-			if err := emitConstDataDeclValue(&sb, c.Value, c.Type, structMap, pkg); err != nil {
-				return "", err
+			if is2DDecl(c.Type, c.Value) {
+				if err := emit2DDataOrConstDecl(&sb, c.Name, pkg, isExported(c.Name), c.Type, c.Length, c.Value, structMap); err != nil {
+					return "", err
+				}
+			} else {
+				name := mangleSymbol(pkg, c.Name)
+				if isExported(c.Name) {
+					sb.WriteString(fmt.Sprintf(".export %s\n", name))
+				}
+				sb.WriteString(fmt.Sprintf("%s:\n", name))
+				if err := emitConstDataDeclValue(&sb, c.Value, c.Type, structMap, pkg); err != nil {
+					return "", err
+				}
 			}
 			sb.WriteString("\n")
 		}
@@ -943,7 +1020,7 @@ func generateAssembly(file *SourceFile, funcMap map[string]*FuncDecl) (string, e
 	// Functions / Procedures (Relocated to $A000-$BFFF)
 	if len(funcDecls) > 0 {
 		sb.WriteString("; Functions\n")
-		cg := newCodeGenerator(file, structMap, localVars, funcMap)
+		cg := newCodeGenerator(file, structMap, localVars, funcMap, declMap)
 
 		for _, f := range funcDecls {
 			pkg := f.Package
@@ -1118,18 +1195,20 @@ type codeGenerator struct {
 	structMap  map[string]*StructType
 	localVars  map[string]*VarDecl
 	funcMap    map[string]*FuncDecl
+	declMap    map[string]Decl
 	curFunc    *FuncDecl
 	paramLocs  map[string]ParamLocation
 	labelCount int
 	loopStack  []loopInfo
 }
 
-func newCodeGenerator(file *SourceFile, structMap map[string]*StructType, localVars map[string]*VarDecl, funcMap map[string]*FuncDecl) *codeGenerator {
+func newCodeGenerator(file *SourceFile, structMap map[string]*StructType, localVars map[string]*VarDecl, funcMap map[string]*FuncDecl, declMap map[string]Decl) *codeGenerator {
 	return &codeGenerator{
 		file:      file,
 		structMap: structMap,
 		localVars: localVars,
 		funcMap:   funcMap,
+		declMap:   declMap,
 		paramLocs: make(map[string]ParamLocation),
 	}
 }
@@ -1687,9 +1766,78 @@ func (cg *codeGenerator) compileConditionBranch(sb *strings.Builder, cond Expr, 
 	}
 }
 
+func (cg *codeGenerator) resolve2DArrayInfo(arrayExpr Expr) (pkg string, name string, is2D bool) {
+	if ident, ok := arrayExpr.(*Ident); ok {
+		name = ident.Name
+		pkg = cg.file.PackageName
+		if d, ok := cg.declMap[name]; ok {
+			switch decl := d.(type) {
+			case *DataDecl:
+				if decl.Package != "" {
+					pkg = decl.Package
+				}
+				is2D = is2DDecl(decl.Type, decl.Value)
+			case *ConstDecl:
+				if decl.Package != "" {
+					pkg = decl.Package
+				}
+				is2D = is2DDecl(decl.Type, decl.Value)
+			case *VarDecl:
+				if decl.Package != "" {
+					pkg = decl.Package
+				}
+				is2D = is2DDecl(decl.Type, decl.Init)
+			}
+		} else if d, ok := cg.declMap[cg.file.PackageName+"."+name]; ok {
+			switch decl := d.(type) {
+			case *DataDecl:
+				if decl.Package != "" {
+					pkg = decl.Package
+				}
+				is2D = is2DDecl(decl.Type, decl.Value)
+			case *ConstDecl:
+				if decl.Package != "" {
+					pkg = decl.Package
+				}
+				is2D = is2DDecl(decl.Type, decl.Value)
+			case *VarDecl:
+				if decl.Package != "" {
+					pkg = decl.Package
+				}
+				is2D = is2DDecl(decl.Type, decl.Init)
+			}
+		}
+		return
+	}
+	if mem, ok := arrayExpr.(*MemberExpr); ok {
+		if targetIdent, ok := mem.Target.(*Ident); ok {
+			pkg = targetIdent.Name
+			name = mem.Member
+			key := pkg + "." + name
+			if d, ok := cg.declMap[key]; ok {
+				switch decl := d.(type) {
+				case *DataDecl:
+					is2D = is2DDecl(decl.Type, decl.Value)
+				case *ConstDecl:
+					is2D = is2DDecl(decl.Type, decl.Value)
+				case *VarDecl:
+					is2D = is2DDecl(decl.Type, decl.Init)
+				}
+			}
+		}
+		return
+	}
+	return "", "", false
+}
+
 func (cg *codeGenerator) evalExprIntoA(sb *strings.Builder, expr Expr) {
 	if expr == nil {
 		sb.WriteString("  LDA #$00\n")
+		return
+	}
+
+	if length, ok := resolveLength(expr, cg.file.PackageName, cg.declMap); ok {
+		sb.WriteString(fmt.Sprintf("  LDA #$%02X\n", length&0xFF))
 		return
 	}
 
@@ -1758,6 +1906,10 @@ func (cg *codeGenerator) evalExprIntoA(sb *strings.Builder, expr Expr) {
 }
 
 func (cg *codeGenerator) evalExprIntoX(sb *strings.Builder, expr Expr) {
+	if length, ok := resolveLength(expr, cg.file.PackageName, cg.declMap); ok {
+		sb.WriteString(fmt.Sprintf("  LDX #$%02X\n", length&0xFF))
+		return
+	}
 	if num, ok := expr.(*NumberLit); ok {
 		sb.WriteString(fmt.Sprintf("  LDX #%s\n", formatConstExpr(num, cg.file.PackageName)))
 		return
@@ -1772,6 +1924,10 @@ func (cg *codeGenerator) evalExprIntoX(sb *strings.Builder, expr Expr) {
 }
 
 func (cg *codeGenerator) evalExprIntoY(sb *strings.Builder, expr Expr) {
+	if length, ok := resolveLength(expr, cg.file.PackageName, cg.declMap); ok {
+		sb.WriteString(fmt.Sprintf("  LDY #$%02X\n", length&0xFF))
+		return
+	}
 	if num, ok := expr.(*NumberLit); ok {
 		sb.WriteString(fmt.Sprintf("  LDY #%s\n", formatConstExpr(num, cg.file.PackageName)))
 		return
@@ -1827,6 +1983,29 @@ func (cg *codeGenerator) emitPointerLoad(sb *strings.Builder, expr Expr, targetZ
 		}
 	}
 
+	if idxExpr, ok := expr.(*IndexExpr); ok {
+		pkg, name, is2D := cg.resolve2DArrayInfo(idxExpr.Array)
+		if is2D {
+			if num, ok := idxExpr.Index.(*NumberLit); ok {
+				subSym := mangleSymbol(pkg, fmt.Sprintf("%s_%d", name, int(num.Value)))
+				sb.WriteString(fmt.Sprintf("  LDA #<%s\n", subSym))
+				sb.WriteString(fmt.Sprintf("  STA %s\n", targetZP))
+				sb.WriteString(fmt.Sprintf("  LDA #>%s\n", subSym))
+				sb.WriteString(fmt.Sprintf("  STA %s+1\n", targetZP))
+				return
+			}
+			tableSym := mangleSymbol(pkg, name)
+			cg.evalExprIntoA(sb, idxExpr.Index)
+			sb.WriteString("  ASL\n")
+			sb.WriteString("  TAX\n")
+			sb.WriteString(fmt.Sprintf("  LDA %s, X\n", tableSym))
+			sb.WriteString(fmt.Sprintf("  STA %s\n", targetZP))
+			sb.WriteString(fmt.Sprintf("  LDA %s+1, X\n", tableSym))
+			sb.WriteString(fmt.Sprintf("  STA %s+1\n", targetZP))
+			return
+		}
+	}
+
 	symStr := cg.formatRawSymbol(expr)
 	sb.WriteString(fmt.Sprintf("  LDA #<%s\n", symStr))
 	sb.WriteString(fmt.Sprintf("  STA %s\n", targetZP))
@@ -1835,10 +2014,36 @@ func (cg *codeGenerator) emitPointerLoad(sb *strings.Builder, expr Expr, targetZ
 }
 
 func (cg *codeGenerator) emitAddressIntoAX(sb *strings.Builder, expr Expr) {
+	if length, ok := resolveLength(expr, cg.file.PackageName, cg.declMap); ok {
+		sb.WriteString(fmt.Sprintf("  LDA #$%02X\n", length&0xFF))
+		sb.WriteString(fmt.Sprintf("  LDX #$%02X\n", (length>>8)&0xFF))
+		return
+	}
 	if num, ok := expr.(*NumberLit); ok {
 		sb.WriteString(fmt.Sprintf("  LDA #$%02X\n", num.Value&0xFF))
 		sb.WriteString(fmt.Sprintf("  LDX #$%02X\n", (num.Value>>8)&0xFF))
 		return
+	}
+	if idxExpr, ok := expr.(*IndexExpr); ok {
+		pkg, name, is2D := cg.resolve2DArrayInfo(idxExpr.Array)
+		if is2D {
+			if num, ok := idxExpr.Index.(*NumberLit); ok {
+				subSym := mangleSymbol(pkg, fmt.Sprintf("%s_%d", name, int(num.Value)))
+				sb.WriteString(fmt.Sprintf("  LDA #<%s\n", subSym))
+				sb.WriteString(fmt.Sprintf("  LDX #>%s\n", subSym))
+				return
+			}
+			tableSym := mangleSymbol(pkg, name)
+			cg.evalExprIntoA(sb, idxExpr.Index)
+			sb.WriteString("  ASL\n")
+			sb.WriteString("  TAX\n")
+			sb.WriteString(fmt.Sprintf("  LDA %s, X\n", tableSym))
+			sb.WriteString("  PHA\n")
+			sb.WriteString(fmt.Sprintf("  LDA %s+1, X\n", tableSym))
+			sb.WriteString("  TAX\n")
+			sb.WriteString("  PLA\n")
+			return
+		}
 	}
 	symStr := cg.formatRawSymbol(expr)
 	sb.WriteString(fmt.Sprintf("  LDA #<%s\n", symStr))
@@ -1846,10 +2051,37 @@ func (cg *codeGenerator) emitAddressIntoAX(sb *strings.Builder, expr Expr) {
 }
 
 func (cg *codeGenerator) emitAddressIntoXY(sb *strings.Builder, expr Expr) {
+	if length, ok := resolveLength(expr, cg.file.PackageName, cg.declMap); ok {
+		sb.WriteString(fmt.Sprintf("  LDX #$%02X\n", length&0xFF))
+		sb.WriteString(fmt.Sprintf("  LDY #$%02X\n", (length>>8)&0xFF))
+		return
+	}
 	if num, ok := expr.(*NumberLit); ok {
 		sb.WriteString(fmt.Sprintf("  LDX #$%02X\n", num.Value&0xFF))
 		sb.WriteString(fmt.Sprintf("  LDY #$%02X\n", (num.Value>>8)&0xFF))
 		return
+	}
+	if idxExpr, ok := expr.(*IndexExpr); ok {
+		pkg, name, is2D := cg.resolve2DArrayInfo(idxExpr.Array)
+		if is2D {
+			if num, ok := idxExpr.Index.(*NumberLit); ok {
+				subSym := mangleSymbol(pkg, fmt.Sprintf("%s_%d", name, int(num.Value)))
+				sb.WriteString(fmt.Sprintf("  LDX #<%s\n", subSym))
+				sb.WriteString(fmt.Sprintf("  LDY #>%s\n", subSym))
+				return
+			}
+			tableSym := mangleSymbol(pkg, name)
+			cg.evalExprIntoA(sb, idxExpr.Index)
+			sb.WriteString("  ASL\n")
+			sb.WriteString("  TAX\n")
+			sb.WriteString(fmt.Sprintf("  LDA %s, X\n", tableSym))
+			sb.WriteString("  PHA\n")
+			sb.WriteString(fmt.Sprintf("  LDA %s+1, X\n", tableSym))
+			sb.WriteString("  TAY\n")
+			sb.WriteString("  PLA\n")
+			sb.WriteString("  TAX\n")
+			return
+		}
 	}
 	symStr := cg.formatRawSymbol(expr)
 	sb.WriteString(fmt.Sprintf("  LDX #<%s\n", symStr))
@@ -1857,6 +2089,10 @@ func (cg *codeGenerator) emitAddressIntoXY(sb *strings.Builder, expr Expr) {
 }
 
 func (cg *codeGenerator) emitWordOrPointerLoad(sb *strings.Builder, expr Expr, targetZP string) {
+	if _, ok := resolveLength(expr, cg.file.PackageName, cg.declMap); ok {
+		cg.emitWordLoad(sb, expr, targetZP)
+		return
+	}
 	if num, ok := expr.(*NumberLit); ok {
 		cg.emitWordLoad(sb, num, targetZP)
 		return
@@ -1888,6 +2124,13 @@ func (cg *codeGenerator) emitDWordLoad(sb *strings.Builder, expr Expr, targetZP 
 }
 
 func (cg *codeGenerator) emitWordLoad(sb *strings.Builder, expr Expr, targetZP string) {
+	if length, ok := resolveLength(expr, cg.file.PackageName, cg.declMap); ok {
+		sb.WriteString(fmt.Sprintf("  LDA #$%02X\n", length&0xFF))
+		sb.WriteString(fmt.Sprintf("  STA %s\n", targetZP))
+		sb.WriteString(fmt.Sprintf("  LDA #$%02X\n", (length>>8)&0xFF))
+		sb.WriteString(fmt.Sprintf("  STA %s+1\n", targetZP))
+		return
+	}
 	if num, ok := expr.(*NumberLit); ok {
 		sb.WriteString(fmt.Sprintf("  LDA #$%02X\n", num.Value&0xFF))
 		sb.WriteString(fmt.Sprintf("  STA %s\n", targetZP))
@@ -1903,6 +2146,9 @@ func (cg *codeGenerator) emitWordLoad(sb *strings.Builder, expr Expr, targetZP s
 }
 
 func (cg *codeGenerator) formatOperand(expr Expr) string {
+	if length, ok := resolveLength(expr, cg.file.PackageName, cg.declMap); ok {
+		return fmt.Sprintf("#$%02X", length&0xFF)
+	}
 	if num, ok := expr.(*NumberLit); ok {
 		return fmt.Sprintf("#%s", formatConstExpr(num, cg.file.PackageName))
 	}
@@ -1934,6 +2180,15 @@ func (cg *codeGenerator) formatRawSymbol(expr Expr) string {
 			return mangleSymbol(targetIdent.Name, e.Member)
 		}
 		return mangleSymbol(cg.file.PackageName, e.Member)
+	case *IndexExpr:
+		pkg, name, is2D := cg.resolve2DArrayInfo(e.Array)
+		if is2D {
+			if num, ok := e.Index.(*NumberLit); ok {
+				return mangleSymbol(pkg, fmt.Sprintf("%s_%d", name, int(num.Value)))
+			}
+			return mangleSymbol(pkg, name)
+		}
+		return formatConstExpr(expr, cg.file.PackageName)
 	default:
 		return formatConstExpr(expr, cg.file.PackageName)
 	}
@@ -1992,6 +2247,253 @@ func exprSize(expr Expr, elemSize int) int {
 	}
 }
 
+func is2DArray(t TypeSpec) bool {
+	if arr, ok := t.(*ArrayType); ok {
+		if _, isInnerArr := arr.Elem.(*ArrayType); isInnerArr {
+			return true
+		}
+		if _, isInnerPtr := arr.Elem.(*PointerType); isInnerPtr {
+			return true
+		}
+	}
+	return false
+}
+
+func is2DDecl(typ TypeSpec, val Expr) bool {
+	if is2DArray(typ) {
+		return true
+	}
+	if arrLit, ok := val.(*ArrayLit); ok && len(arrLit.Elements) > 0 {
+		switch arrLit.Elements[0].(type) {
+		case *IncpalExpr, *IncchrExpr, *IncbinExpr, *ArrayLit, *StringLit:
+			return true
+		}
+	}
+	return false
+}
+
+func getExprDataLength(expr Expr) int {
+	if expr == nil {
+		return 0
+	}
+	switch e := expr.(type) {
+	case *IncpalExpr:
+		if e.Count != nil {
+			if num, ok := e.Count.(*NumberLit); ok && num.Value > 0 {
+				return int(num.Value)
+			}
+		}
+		return 16
+	case *ArrayLit:
+		if e.Length != nil {
+			if num, ok := e.Length.(*NumberLit); ok && num.Value > 0 {
+				return int(num.Value)
+			}
+		}
+		return len(e.Elements)
+	case *StringLit:
+		return len(e.Value)
+	default:
+		return 1
+	}
+}
+
+func resolveLength(expr Expr, defaultPkg string, declMap map[string]Decl) (int, bool) {
+	mem, ok := expr.(*MemberExpr)
+	if !ok {
+		return 0, false
+	}
+	if mem.Member != "Length" && mem.Member != "length" && mem.Member != "Len" && mem.Member != "len" {
+		return 0, false
+	}
+
+	// Case 1: Target is IndexExpr, e.g. Palettes[0].Length or data.Palettes[0].Length
+	if idxExpr, ok := mem.Target.(*IndexExpr); ok {
+		var declKey string
+		if ident, ok := idxExpr.Array.(*Ident); ok {
+			declKey = ident.Name
+		} else if targetMem, ok := idxExpr.Array.(*MemberExpr); ok {
+			if targetIdent, ok := targetMem.Target.(*Ident); ok {
+				declKey = targetIdent.Name + "." + targetMem.Member
+			}
+		}
+
+		var targetDecl Decl
+		if declKey != "" && declMap != nil {
+			if d, ok := declMap[declKey]; ok {
+				targetDecl = d
+			} else if defaultPkg != "" {
+				if d, ok := declMap[defaultPkg+"."+declKey]; ok {
+					targetDecl = d
+				}
+			}
+		}
+
+		if targetDecl != nil {
+			var val Expr
+			var declType TypeSpec
+			switch d := targetDecl.(type) {
+			case *DataDecl:
+				val = d.Value
+				declType = d.Type
+			case *ConstDecl:
+				val = d.Value
+				declType = d.Type
+			case *VarDecl:
+				val = d.Init
+				declType = d.Type
+			}
+
+			if num, ok := idxExpr.Index.(*NumberLit); ok {
+				idx := int(num.Value)
+				if arrLit, ok := val.(*ArrayLit); ok {
+					if idx >= 0 && idx < len(arrLit.Elements) {
+						return getExprDataLength(arrLit.Elements[idx]), true
+					}
+				}
+			} else {
+				// Variable index: if elements are uniform
+				if arrLit, ok := val.(*ArrayLit); ok && len(arrLit.Elements) > 0 {
+					firstLen := getExprDataLength(arrLit.Elements[0])
+					allSame := true
+					for _, elem := range arrLit.Elements {
+						if getExprDataLength(elem) != firstLen {
+							allSame = false
+							break
+						}
+					}
+					if allSame {
+						return firstLen, true
+					}
+				}
+			}
+
+			// Check inner array type length if fixed
+			if arrType, ok := declType.(*ArrayType); ok {
+				if innerArr, ok := arrType.Elem.(*ArrayType); ok && innerArr.Length != nil {
+					if innerNum, ok := innerArr.Length.(*NumberLit); ok && innerNum.Value > 0 {
+						return int(innerNum.Value), true
+					}
+				}
+			}
+		}
+	}
+
+	// Case 2: Target is Ident or MemberExpr directly, e.g. Palettes.Length or TilesSurfacePal.Length
+	var declKey string
+	if ident, ok := mem.Target.(*Ident); ok {
+		declKey = ident.Name
+	} else if targetMem, ok := mem.Target.(*MemberExpr); ok {
+		if targetIdent, ok := targetMem.Target.(*Ident); ok {
+			declKey = targetIdent.Name + "." + targetMem.Member
+		}
+	}
+
+	if declKey != "" && declMap != nil {
+		var targetDecl Decl
+		if d, ok := declMap[declKey]; ok {
+			targetDecl = d
+		} else if defaultPkg != "" {
+			if d, ok := declMap[defaultPkg+"."+declKey]; ok {
+				targetDecl = d
+			}
+		}
+
+		if targetDecl != nil {
+			switch d := targetDecl.(type) {
+			case *DataDecl:
+				if is2DDecl(d.Type, d.Value) {
+					if arrLit, ok := d.Value.(*ArrayLit); ok {
+						return len(arrLit.Elements), true
+					}
+				}
+				return getExprDataLength(d.Value), true
+			case *ConstDecl:
+				if is2DDecl(d.Type, d.Value) {
+					if arrLit, ok := d.Value.(*ArrayLit); ok {
+						return len(arrLit.Elements), true
+					}
+				}
+				return getExprDataLength(d.Value), true
+			case *VarDecl:
+				if arrType, ok := d.Type.(*ArrayType); ok && arrType.Length != nil {
+					if num, ok := arrType.Length.(*NumberLit); ok && num.Value > 0 {
+						return int(num.Value), true
+					}
+				}
+				return varSize(d), true
+			}
+		}
+	}
+
+	return 0, false
+}
+
+func emit2DDataOrConstDecl(sb *strings.Builder, name string, pkg string, isExport bool, typ TypeSpec, length Expr, val Expr, structMap map[string]*StructType) error {
+	var innerType TypeSpec
+	if arrType, ok := typ.(*ArrayType); ok {
+		innerType = arrType.Elem
+	}
+	expectedLen := -1
+	if length != nil {
+		if num, ok := length.(*NumberLit); ok && num.Value >= 0 {
+			expectedLen = int(num.Value)
+		}
+	} else if arrType, ok := typ.(*ArrayType); ok && arrType.Length != nil {
+		if num, ok := arrType.Length.(*NumberLit); ok && num.Value >= 0 {
+			expectedLen = int(num.Value)
+		}
+	}
+
+	arrLit, ok := val.(*ArrayLit)
+	if !ok {
+		// Fallback to single value
+		mainSym := mangleSymbol(pkg, name)
+		if isExport {
+			sb.WriteString(fmt.Sprintf(".export %s\n", mainSym))
+		}
+		sb.WriteString(fmt.Sprintf("%s:\n", mainSym))
+		return emitConstDataDeclValue(sb, val, typ, structMap, pkg)
+	}
+
+	if innerType == nil && arrLit.ElemType != nil {
+		innerType = arrLit.ElemType
+	}
+
+	// 1. Emit each sub-array with label _<pkg>_<name>_<i>
+	for i, elem := range arrLit.Elements {
+		subSym := mangleSymbol(pkg, fmt.Sprintf("%s_%d", name, i))
+		if isExport {
+			sb.WriteString(fmt.Sprintf(".export %s\n", subSym))
+		}
+		sb.WriteString(fmt.Sprintf("%s:\n", subSym))
+		if err := emitConstDataDeclValue(sb, elem, innerType, structMap, pkg); err != nil {
+			return err
+		}
+		sb.WriteString("\n")
+	}
+
+	// 2. Emit main pointer table
+	mainSym := mangleSymbol(pkg, name)
+	if isExport {
+		sb.WriteString(fmt.Sprintf(".export %s\n", mainSym))
+	}
+	sb.WriteString(fmt.Sprintf("%s:\n", mainSym))
+
+	var ptrItems []string
+	for i := range arrLit.Elements {
+		ptrItems = append(ptrItems, mangleSymbol(pkg, fmt.Sprintf("%s_%d", name, i)))
+	}
+	if expectedLen > len(arrLit.Elements) {
+		for i := len(arrLit.Elements); i < expectedLen; i++ {
+			ptrItems = append(ptrItems, "$0000")
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("  .word %s\n", strings.Join(ptrItems, ", ")))
+	return nil
+}
+
 func typeSize(t TypeSpec) int {
 	return typeSizeWithStructs(t, nil)
 }
@@ -2024,6 +2526,14 @@ func typeSizeWithStructs(t TypeSpec, structMap map[string]*StructType) int {
 			return 1
 		}
 	case *ArrayType:
+		if is2DArray(typ) {
+			if typ.Length != nil {
+				if num, ok := typ.Length.(*NumberLit); ok && num.Value > 0 {
+					return 2 * int(num.Value)
+				}
+			}
+			return 2
+		}
 		elemSize := typeSizeWithStructs(typ.Elem, structMap)
 		if typ.Length != nil {
 			if num, ok := typ.Length.(*NumberLit); ok && num.Value > 0 {
@@ -2354,6 +2864,9 @@ func formatConstExpr(expr Expr, defaultPkg string) string {
 	case *Ident:
 		return mangleSymbol(defaultPkg, e.Name)
 	case *MemberExpr:
+		if length, ok := resolveLength(e, defaultPkg, nil); ok {
+			return fmt.Sprintf("%d", length)
+		}
 		if targetIdent, ok := e.Target.(*Ident); ok {
 			return mangleSymbol(targetIdent.Name, e.Member)
 		}

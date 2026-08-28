@@ -827,7 +827,7 @@ func (p *Parser) parseTypeSpec() (TypeSpec, error) {
 		name := p.curToken.Literal
 		p.nextToken()
 		var baseType TypeSpec = &NamedType{Name: name, pos: pos}
-		if p.curTokenIs(TokenLBracket) {
+		for p.curTokenIs(TokenLBracket) {
 			p.nextToken() // consume '['
 			var lengthExpr Expr
 			var err error

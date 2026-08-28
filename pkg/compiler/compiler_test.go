@@ -1106,4 +1106,171 @@ func TestBuildGameWithSpriteCalls(t *testing.T) {
 	}
 }
 
+func TestCompile2DDataArrayAndLength(t *testing.T) {
+	src := `
+package main
+
+import (
+    "memory.m3"
+)
+
+data Palettes uint8[][] bank 1 = {
+    incpal("gfx/tiles_surface.pal"),
+    incpal("gfx/sprites.pal"),
+}
+
+var palette_buffer uint8[32] ram
+
+func test() {
+    memory.Copy(Palettes[0], palette_buffer, Palettes[0].Length)
+}
+`
+	_, asmOutput, err := Compile("test.m3", src)
+	if err != nil {
+		t.Fatalf("Compile failed: %v", err)
+	}
+
+	expectedSnippets := []string{
+		".bank 1",
+		".data",
+		".export _main_Palettes_0",
+		"_main_Palettes_0:\n  .incpal \"gfx/tiles_surface.pal\"",
+		".export _main_Palettes_1",
+		"_main_Palettes_1:\n  .incpal \"gfx/sprites.pal\"",
+		".export _main_Palettes",
+		"_main_Palettes:\n  .word _main_Palettes_0, _main_Palettes_1",
+		"LDA #<_main_palette_buffer",
+		"STA __leaf_param0",
+		"LDA #>_main_palette_buffer",
+		"STA __leaf_param0+1",
+		"LDA #$10",
+		"STA __leaf_param2",
+		"LDA #$00",
+		"STA __leaf_param2+1",
+		"LDA #<_main_Palettes_0",
+		"LDX #>_main_Palettes_0",
+		"JSR _memory_Copy",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(asmOutput, snippet) {
+			t.Errorf("expected assembly to contain %q, got:\n%s", snippet, asmOutput)
+		}
+	}
+}
+
+func TestCompile2DDataArrayDynamicIndex(t *testing.T) {
+	src := `
+package main
+
+import (
+    "memory.m3"
+)
+
+data Palettes uint8[][] = {
+    {1, 2, 3, 4},
+    {5, 6, 7, 8},
+}
+
+var idx uint8 zp
+var buf uint8[4] ram
+
+func test() {
+    memory.Copy(Palettes[idx], buf, Palettes[idx].Length)
+}
+`
+	_, asmOutput, err := Compile("test.m3", src)
+	if err != nil {
+		t.Fatalf("Compile failed: %v", err)
+	}
+
+	expectedSnippets := []string{
+		"_main_Palettes_0:\n  .byte $01, $02, $03, $04",
+		"_main_Palettes_1:\n  .byte $05, $06, $07, $08",
+		"_main_Palettes:\n  .word _main_Palettes_0, _main_Palettes_1",
+		"LDA #$04",
+		"STA __leaf_param2",
+		"LDA _main_idx",
+		"ASL",
+		"TAX",
+		"LDA _main_Palettes, X",
+		"PHA",
+		"LDA _main_Palettes+1, X",
+		"TAX",
+		"PLA",
+		"JSR _memory_Copy",
+	}
+
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(asmOutput, snippet) {
+			t.Errorf("expected assembly to contain %q, got:\n%s", snippet, asmOutput)
+		}
+	}
+}
+
+func TestBuild2DDataMultiFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	dataM3 := `
+package data
+
+data Palettes uint8[][] bank 61 = {
+    incpal("tiles.pal"),
+    incpal("sprites.pal"),
+}
+`
+	mainM3 := `
+package main
+
+import (
+    "memory.m3"
+    "mmc.m3"
+    "./data.m3"
+)
+
+var palette_buffer uint8[32] ram
+
+func main() bank 63 {
+    mmc.PushDataBank(^data.Palettes)
+    memory.Copy(data.Palettes[0], palette_buffer, data.Palettes[0].Length)
+    memory.Copy(data.Palettes[1], &palette_buffer[16], data.Palettes[1].Length)
+    mmc.PopDataBank()
+}
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "data.m3"), []byte(dataM3), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "main.m3"), []byte(mainM3), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	palContent := []byte(`
+0:
+$0F
+$00
+$10
+$30
+1:
+$0F
+$01
+$11
+$31
+`)
+	if err := os.WriteFile(filepath.Join(tmpDir, "tiles.pal"), palContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "sprites.pal"), palContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rom, err := Build([]string{filepath.Join(tmpDir, "main.m3")})
+	if err != nil {
+		t.Fatalf("Build multi-file 2D data failed: %v", err)
+	}
+	if len(rom) != 16+64*8192 {
+		t.Fatalf("expected ROM size %d, got %d", 16+64*8192, len(rom))
+	}
+}
+
+
 

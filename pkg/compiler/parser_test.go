@@ -676,3 +676,66 @@ func FuncInAuto() {
 		t.Errorf("expected FuncInAuto to have Bank auto, got %+v", f8.Bank)
 	}
 }
+
+func TestParseMultiDimensionalArray(t *testing.T) {
+	input := `package test
+
+data Palettes uint8[][] = {
+    incpal("gfx/tiles_surface.pal"),
+    incpal("gfx/sprites.pal"),
+}
+
+var grid uint8[4][8] ram
+const tables uint16[2][] = {
+    {1, 2, 3},
+    {4, 5, 6},
+}
+`
+	lexer := NewLexer("test.m3", input)
+	parser := NewParser(lexer)
+	file, err := parser.ParseSourceFile()
+	if err != nil {
+		t.Fatalf("unexpected error parsing multi-dimensional arrays: %v", err)
+	}
+
+	if len(file.Decls) != 3 {
+		t.Fatalf("expected 3 decls, got %d", len(file.Decls))
+	}
+
+	d, ok := file.Decls[0].(*DataDecl)
+	if !ok {
+		t.Fatalf("expected DataDecl, got %T", file.Decls[0])
+	}
+	arrType, ok := d.Type.(*ArrayType)
+	if !ok {
+		t.Fatalf("expected ArrayType, got %T", d.Type)
+	}
+	innerArr, ok := arrType.Elem.(*ArrayType)
+	if !ok {
+		t.Fatalf("expected inner ArrayType, got %T", arrType.Elem)
+	}
+	named, ok := innerArr.Elem.(*NamedType)
+	if !ok || named.Name != "uint8" {
+		t.Fatalf("expected NamedType uint8, got %+v", innerArr.Elem)
+	}
+
+	v, ok := file.Decls[1].(*VarDecl)
+	if !ok {
+		t.Fatalf("expected VarDecl, got %T", file.Decls[1])
+	}
+	varArr, ok := v.Type.(*ArrayType)
+	if !ok {
+		t.Fatalf("expected ArrayType, got %T", v.Type)
+	}
+	if varArr.Length == nil || varArr.Length.(*NumberLit).Value != 8 {
+		t.Errorf("expected outer length 8, got %+v", varArr.Length)
+	}
+	varInnerArr, ok := varArr.Elem.(*ArrayType)
+	if !ok {
+		t.Fatalf("expected inner ArrayType, got %T", varArr.Elem)
+	}
+	if varInnerArr.Length == nil || varInnerArr.Length.(*NumberLit).Value != 4 {
+		t.Errorf("expected inner length 4, got %+v", varInnerArr.Length)
+	}
+}
+

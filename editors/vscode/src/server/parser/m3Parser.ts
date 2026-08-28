@@ -217,7 +217,7 @@ export function parseM3Document(text: string, docUri?: string): ParsedM3Document
 
     // Inside grouped data ( ... )
     if (inGroupBlock === 'data') {
-      const dataMatch = codeLine.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])?))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
+      const dataMatch = codeLine.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])*))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
       if (dataMatch) {
         const dataName = dataMatch[1];
         const dataType = dataMatch[2] || '';
@@ -243,7 +243,7 @@ export function parseM3Document(text: string, docUri?: string): ParsedM3Document
 
     // Inside grouped var ( ... )
     if (inGroupBlock === 'var') {
-      const varMatch = codeLine.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])?)(?:\s+(zp|zeropage|ram|bss|wram|workram))?/);
+      const varMatch = codeLine.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])*)(?:\s+(zp|zeropage|ram|bss|wram|workram))?/);
       if (varMatch) {
         const varName = varMatch[1];
         const varType = varMatch[2];
@@ -267,7 +267,7 @@ export function parseM3Document(text: string, docUri?: string): ParsedM3Document
 
     // Inside grouped const ( ... )
     if (inGroupBlock === 'const') {
-      const constMatch = codeLine.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])?))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
+      const constMatch = codeLine.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])*))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
       if (constMatch) {
         const constName = constMatch[1];
         const constType = constMatch[2] || '';
@@ -390,7 +390,7 @@ export function parseM3Document(text: string, docUri?: string): ParsedM3Document
     }
 
     // Single-line var declaration: var <name> <type>[length] [storage]
-    const singleVarMatch = codeLine.match(/^var\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])?)(?:\s+(zp|zeropage|ram|bss|wram|workram))?/);
+    const singleVarMatch = codeLine.match(/^var\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])*)(?:\s+(zp|zeropage|ram|bss|wram|workram))?/);
     if (singleVarMatch) {
       const varName = singleVarMatch[1];
       const varType = singleVarMatch[2];
@@ -412,7 +412,7 @@ export function parseM3Document(text: string, docUri?: string): ParsedM3Document
     }
 
     // Single-line const declaration: const <name> <type>[length] [bank <n>] = <val>
-    const singleConstMatch = codeLine.match(/^const\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])?))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
+    const singleConstMatch = codeLine.match(/^const\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])*))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
     if (singleConstMatch) {
       const constName = singleConstMatch[1];
       const constType = singleConstMatch[2] || '';
@@ -436,7 +436,7 @@ export function parseM3Document(text: string, docUri?: string): ParsedM3Document
     }
 
     // Single-line data declaration: data <name> <type>[length] [bank <n>] = <val>
-    const singleDataMatch = codeLine.match(/^data\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])?))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
+    const singleDataMatch = codeLine.match(/^data\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])*))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
     if (singleDataMatch) {
       const dataName = singleDataMatch[1];
       const dataType = singleDataMatch[2] || '';
@@ -726,7 +726,7 @@ function parseM3DocumentWithoutImports(text: string): ParsedM3Document {
     }
 
     if (inGroupBlock === 'var') {
-      const varMatch = codeLine.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])?)(?:\s+(zp|zeropage|ram|bss|wram|workram))?/);
+      const varMatch = codeLine.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])*)(?:\s+(zp|zeropage|ram|bss|wram|workram))?/);
       if (varMatch) {
         const varName = varMatch[1];
         const varType = varMatch[2];
@@ -748,7 +748,7 @@ function parseM3DocumentWithoutImports(text: string): ParsedM3Document {
     }
 
     if (inGroupBlock === 'const') {
-      const constMatch = codeLine.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])?))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
+      const constMatch = codeLine.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])*))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
       if (constMatch) {
         const constName = constMatch[1];
         const constType = constMatch[2] || '';
@@ -849,7 +849,7 @@ function parseM3DocumentWithoutImports(text: string): ParsedM3Document {
       continue;
     }
 
-    const singleVarMatch = codeLine.match(/^var\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])?)(?:\s+(zp|zeropage|ram|bss|wram|workram))?/);
+    const singleVarMatch = codeLine.match(/^var\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])*)(?:\s+(zp|zeropage|ram|bss|wram|workram))?/);
     if (singleVarMatch) {
       const varName = singleVarMatch[1];
       const varType = singleVarMatch[2];
@@ -869,7 +869,7 @@ function parseM3DocumentWithoutImports(text: string): ParsedM3Document {
       continue;
     }
 
-    const singleConstMatch = codeLine.match(/^const\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])?))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
+    const singleConstMatch = codeLine.match(/^const\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+([*]?[a-zA-Z0-9_]+(?:\[\s*\d*\s*\])*))?(?:\s+bank\s+(\d+|auto))?(?:\s*=\s*(.+))?/);
     if (singleConstMatch) {
       const constName = singleConstMatch[1];
       const constType = singleConstMatch[2] || '';
