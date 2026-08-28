@@ -366,6 +366,7 @@ Includes raw binary data directly into the assembled output with optional byte o
 
 #### `.incchr`
 Converts a PNG image directly into standard NES 2BPP planar CHR tile data (16 bytes per 8x8 pixel tile in row-major order). Image width and height must be multiples of 8 pixels.
+The assembler looks for a companion `.pal` file alongside the PNG with the same basename (e.g. `font.pal` for `font.png`). Each 8x8 tile is checked against the defined sub-palettes in the `.pal` file and assigned the matching sub-palette. It is an assemble error if any 8x8 tile cannot be placed into a defined sub-palette.
 
 ```assembly
 .bank 1
@@ -377,15 +378,21 @@ sprite_chr:
 ```
 
 #### `.incpal`
-Extracts palette colors from a PNG image and converts them to NES hardware 2C02 palette index bytes (`$00`–`$3F`). An optional second argument specifies the number of palette color bytes to emit (defaults to `4` for a single NES sub-palette, or up to `16` for full palettes).
+Includes a text `.pal` palette file and converts it into raw binary NES hardware 2C02 palette index bytes (`$00`–`$3F`). An optional second argument specifies the byte count to emit (defaults to 16 bytes). If the palette in the file contains fewer bytes than the specified/default byte count, the data is padded with `0`s.
+
+`.pal` format rules:
+- Defines up to 4 4-color palettes for the NES.
+- Lines matching `^[0-3]:$` indicate the start of a palette slot in strictly increasing numeric order.
+- Up to 4 lines follow specifying hex color values (e.g. `$0F`).
+- Color `$0D` is strictly forbidden.
 
 ```assembly
 .bank 0
 bg_palette:
-    .incpal "assets/title.png"       ; Emits 4 bytes ($00-$3F)
+    .incpal "assets/title.pal", 4    ; Emits 4 bytes ($00-$3F), padded with 0 if fewer
 
 full_palette:
-    .incpal "assets/level.png", 16   ; Emits 16 bytes
+    .incpal "assets/level.pal"       ; Emits 16 bytes (default), padded with 0 if fewer
 ```
 
 ---

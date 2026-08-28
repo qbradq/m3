@@ -1597,7 +1597,7 @@ func (p *Parser) parseIncpalExpr() (*IncpalExpr, error) {
 	}
 
 	if !p.curTokenIs(TokenString) {
-		p.errorf("expected PNG file path string literal in incpal expression, got %s (%q)", p.curToken.Type, p.curToken.Literal)
+		p.errorf("expected palette file path string literal in incpal expression, got %s (%q)", p.curToken.Type, p.curToken.Literal)
 		return nil, p.errorResult()
 	}
 	path := p.curToken.Literal

@@ -513,12 +513,17 @@ func main() bank 0 {
 func TestBuildInclusionExpressions(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// 1. Create a valid test PNG (8x8 pixels, 4 colors)
+	// 1. Create a valid test PAL and PNG (8x8 pixels, 4 colors)
+	palText := "0:\n$0F\n$06\n$0A\n$02\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "font.pal"), []byte(palText), 0644); err != nil {
+		t.Fatalf("failed to write temp font.pal: %v", err)
+	}
+
 	pal := color.Palette{
-		color.RGBA{0, 0, 0, 255},
-		color.RGBA{255, 0, 0, 255},
-		color.RGBA{0, 255, 0, 255},
-		color.RGBA{0, 0, 255, 255},
+		color.RGBA{0, 0, 0, 0},         // $0F
+		color.RGBA{84, 4, 0, 255},      // $06
+		color.RGBA{73, 170, 16, 255},   // $0A
+		color.RGBA{20, 18, 167, 255},   // $02
 	}
 	img := image.NewPaletted(image.Rect(0, 0, 8, 8), pal)
 	for x := 0; x < 8; x++ {
@@ -545,12 +550,12 @@ func TestBuildInclusionExpressions(t *testing.T) {
 package main
 
 const (
-    font_pal uint8[16] = incpal("font.png", 16)
+    font_pal uint8[]   = incpal("font.pal")
     font_chr uint8[]   = incchr("font.png")
     bin_data uint8[]   = incbin("raw.bin")
 )
 
-var font_buf uint8[16] = incpal("font.png", 16)
+var font_buf uint8[16] = incpal("font.pal")
 
 func main() bank 0 {
     asm {

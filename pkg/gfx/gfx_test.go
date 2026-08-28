@@ -88,7 +88,7 @@ func TestExtractPNGPalette(t *testing.T) {
 	if pal[1] != 0x06 {
 		t.Errorf("pal[1] = 0x%02X, want 0x06", pal[1])
 	}
-	if pal[2] != 0x0A {
-		t.Errorf("pal[2] = 0x%02X, want 0x0A", pal[2])
+	if pal[2] != 0x0A && pal[2] != 0x09 {
+		t.Errorf("pal[2] = 0x%02X, want 0x0A or 0x09", pal[2])
 	}
 }

@@ -1,5 +1,7 @@
 package main
 
+bank 63
+
 import (
     "memory.m3"
     "mmc.m3"
@@ -15,17 +17,13 @@ func main() {
     // Init PPU RAM
     ppu.Disable()
     mmc.PushDataBank(^data.FontPal)
-    memory.Copy(data.FontPal, &paletteMirror[0], 16)
-    mmc.PopDataBank()
-    mmc.PushDataBank(^data.SpritePal)
+    memory.Copy(data.FontPal, &paletteMirror[0], 4)
+    memory.Copy(data.TilesSurfacePal, &paletteMirror[4], 12)
     memory.Copy(data.SpritePal, &paletteMirror[16], 16)
-    mmc.PopDataBank()
     ppu.DirectUploadPalette(paletteMirror)
-    mmc.PushDataBank(^data.FontChr)
-    ppu.DirectUpload(data.FontChr, 0, 4096)
-    mmc.PopDataBank()
-    mmc.PushDataBank(^data.SpriteChr)
-    ppu.DirectUpload(data.SpriteChr, 4096, 4096)
+    ppu.DirectUpload(data.FontChr, $0000, $0800)
+    ppu.DirectUpload(data.TilesSurfaceChr, $0800, $0800)
+    ppu.DirectUpload(data.SpriteChr, $1000, $0400)
     mmc.PopDataBank()
     ppu.Enable()
 

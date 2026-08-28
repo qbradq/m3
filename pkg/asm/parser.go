@@ -488,7 +488,7 @@ func (p *Parser) parseIncpalDirective() (Statement, error) {
 		return nil, err
 	}
 	if !p.curTokenIs(TokenString) {
-		return nil, fmt.Errorf("%s: expected PNG file path string literal in .incpal directive", p.curTok.Pos)
+		return nil, fmt.Errorf("%s: expected palette file path string literal in .incpal directive", p.curTok.Pos)
 	}
 	filename := p.curTok.Literal
 	if err := p.nextToken(); err != nil {

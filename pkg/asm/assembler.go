@@ -1025,21 +1025,28 @@ func (a *Assembler) getIncpalSize(inc *IncpalDirective) (int, error) {
 		}
 		return int(cVal), nil
 	}
-	return 4, nil
+	return 16, nil
 }
 
 func (a *Assembler) emitIncchr(inc *IncchrDirective) error {
 	bank := a.object.GetOrCreateBank(a.currentBank)
-	path := a.resolvePath(inc.Filename)
-	f, err := os.Open(path)
+	pngPath := a.resolvePath(inc.Filename)
+	palPath := strings.TrimSuffix(pngPath, filepath.Ext(pngPath)) + ".pal"
+
+	pal, err := gfx.LoadPalFile(palPath)
 	if err != nil {
-		return fmt.Errorf("%s: failed to open PNG file %q: %w", inc.Pos(), path, err)
+		return fmt.Errorf("%s: cannot load palette file %q for PNG %q: %w", inc.Pos(), palPath, pngPath, err)
+	}
+
+	f, err := os.Open(pngPath)
+	if err != nil {
+		return fmt.Errorf("%s: failed to open PNG file %q: %w", inc.Pos(), pngPath, err)
 	}
 	defer f.Close()
 
-	chrBytes, err := gfx.ConvertPNGToCHR(f)
+	chrBytes, err := gfx.ConvertPNGToCHRWithPalette(f, pal)
 	if err != nil {
-		return fmt.Errorf("%s: failed to convert PNG %q to CHR: %w", inc.Pos(), path, err)
+		return fmt.Errorf("%s: failed to convert PNG %q to CHR: %w", inc.Pos(), pngPath, err)
 	}
 	bank.Data = append(bank.Data, chrBytes...)
 	return nil
@@ -1048,13 +1055,13 @@ func (a *Assembler) emitIncchr(inc *IncchrDirective) error {
 func (a *Assembler) emitIncpal(inc *IncpalDirective) error {
 	bank := a.object.GetOrCreateBank(a.currentBank)
 	path := a.resolvePath(inc.Filename)
-	f, err := os.Open(path)
+	pal, err := gfx.LoadPalFile(path)
 	if err != nil {
-		return fmt.Errorf("%s: failed to open PNG file %q: %w", inc.Pos(), path, err)
+		return fmt.Errorf("%s: %w", inc.Pos(), err)
 	}
-	defer f.Close()
 
-	count := 4
+	palBytes := pal.ToBytes()
+	count := 16
 	if inc.Count != nil {
 		cVal, err := inc.Count.Eval(a)
 		if err != nil {
@@ -1063,10 +1070,14 @@ func (a *Assembler) emitIncpal(inc *IncpalDirective) error {
 		count = int(cVal)
 	}
 
-	palBytes, err := gfx.ExtractPNGPalette(f, count)
-	if err != nil {
-		return fmt.Errorf("%s: failed to extract palette from PNG %q: %w", inc.Pos(), path, err)
+	if len(palBytes) < count {
+		padded := make([]byte, count)
+		copy(padded, palBytes)
+		palBytes = padded
+	} else if len(palBytes) > count {
+		palBytes = palBytes[:count]
 	}
+
 	bank.Data = append(bank.Data, palBytes...)
 	return nil
 }

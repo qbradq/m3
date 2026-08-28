@@ -538,10 +538,10 @@ msg_hello:
 .bank 1
 
 font_pal:
-    .incpal "data/font.png", 4
+    .incpal "data/font.pal"
 
 sprite_pal:
-    .incpal "data/sprites.png", 4
+    .incpal "data/sprites.pal"
 
 sprite_chr:
     .incchr "data/sprites.png"

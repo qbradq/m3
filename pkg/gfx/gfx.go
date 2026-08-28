@@ -7,33 +7,34 @@ import (
 	_ "image/png"
 	"io"
 	"sort"
+	"strings"
 )
 
 // NES 2C02 standard palette (64 colors in RGB)
 var NESPaletteRGB = [64][3]uint8{
 	// 0x00 - 0x0F
-	{84, 84, 84}, {0, 30, 116}, {8, 16, 144}, {48, 0, 136},
-	{68, 0, 100}, {92, 0, 48}, {84, 4, 0}, {60, 24, 0},
-	{32, 42, 0}, {8, 58, 0}, {0, 64, 0}, {0, 60, 0},
-	{0, 50, 60}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0},
+	{84, 84, 84}, {32, 0, 178}, {20, 18, 167}, {59, 0, 164},
+	{92, 0, 126}, {110, 0, 64}, {108, 6, 0}, {121, 65, 0},
+	{50, 60, 0}, {16, 85, 0}, {73, 170, 16}, {0, 87, 24},
+	{0, 70, 86}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0},
 
 	// 0x10 - 0x1F
-	{152, 150, 152}, {8, 76, 196}, {48, 50, 236}, {92, 30, 228},
-	{136, 20, 176}, {160, 20, 100}, {152, 34, 32}, {120, 60, 0},
-	{84, 90, 0}, {40, 114, 0}, {8, 124, 0}, {0, 118, 40},
-	{0, 102, 120}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0},
+	{102, 102, 102}, {21, 95, 217}, {66, 64, 255}, {117, 39, 254},
+	{160, 26, 204}, {183, 30, 123}, {181, 49, 32}, {153, 78, 0},
+	{107, 109, 0}, {56, 109, 0}, {12, 147, 0}, {0, 140, 67},
+	{0, 122, 144}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0},
 
 	// 0x20 - 0x2F
-	{236, 238, 236}, {76, 154, 236}, {120, 124, 236}, {176, 98, 236},
-	{228, 84, 236}, {236, 88, 180}, {236, 106, 100}, {212, 136, 32},
-	{160, 170, 0}, {116, 196, 0}, {76, 208, 32}, {56, 204, 108},
-	{56, 180, 204}, {60, 60, 60}, {0, 0, 0}, {0, 0, 0},
+	{255, 255, 255}, {97, 162, 255}, {144, 144, 255}, {193, 122, 255},
+	{234, 110, 255}, {254, 114, 201}, {254, 131, 117}, {230, 156, 60},
+	{235, 211, 32}, {139, 211, 0}, {92, 222, 36}, {55, 216, 120},
+	{55, 198, 196}, {78, 78, 78}, {0, 0, 0}, {0, 0, 0},
 
 	// 0x30 - 0x3F
-	{236, 238, 236}, {168, 204, 236}, {188, 188, 236}, {212, 178, 236},
-	{236, 174, 236}, {236, 174, 212}, {236, 180, 176}, {228, 196, 144},
-	{204, 210, 120}, {180, 222, 120}, {168, 226, 144}, {152, 226, 180},
-	{160, 214, 228}, {160, 162, 160}, {0, 0, 0}, {0, 0, 0},
+	{255, 255, 255}, {190, 225, 255}, {206, 209, 255}, {224, 200, 255},
+	{242, 195, 255}, {254, 196, 234}, {254, 202, 198}, {245, 213, 175},
+	{226, 226, 148}, {203, 237, 148}, {180, 242, 163}, {164, 240, 201},
+	{164, 233, 236}, {190, 190, 190}, {0, 0, 0}, {0, 0, 0},
 }
 
 // MatchRGBToNES finds the closest NES 2C02 palette index (0x00 - 0x3F) for given R, G, B
@@ -42,8 +43,8 @@ func MatchRGBToNES(r, g, b uint8) byte {
 	bestDist := int64(1<<60)
 
 	for i := 0; i < 64; i++ {
-		// Skip duplicate black entries
-		if (i >= 0x0E && i <= 0x0F) || (i >= 0x1E && i <= 0x1F) || (i >= 0x2E && i <= 0x2F) || (i >= 0x3E && i <= 0x3F) {
+		// Skip duplicate/forbidden black entries ($0D-$0F, $1D-$1F, $2D-$2F, $3D-$3F except standard black $0F)
+		if (i >= 0x0D && i <= 0x0F) || (i >= 0x1D && i <= 0x1F) || (i >= 0x2D && i <= 0x2F) || (i >= 0x3D && i <= 0x3F) {
 			if i != 0x0F {
 				continue
 			}
@@ -80,6 +81,124 @@ type uniqueColor struct {
 	lum   uint32
 	isTr  bool
 	order int
+}
+
+// PixelToNESColor maps a single pixel color to an NES 2C02 palette index byte.
+// Transparent pixels (alpha < 128) are mapped to 0x0F.
+func PixelToNESColor(c color.Color) byte {
+	r, g, b, a := c.RGBA()
+	if a < 32768 {
+		return 0x0F
+	}
+	return MatchRGBToNES(uint8(r>>8), uint8(g>>8), uint8(b>>8))
+}
+
+// ConvertPNGToCHRWithPalette converts a PNG image stream into standard NES 2BPP planar CHR data
+// using sub-palettes defined in the provided PaletteFile.
+func ConvertPNGToCHRWithPalette(r io.Reader, pal *PaletteFile) ([]byte, error) {
+	if pal == nil || len(pal.Palettes) == 0 {
+		return nil, fmt.Errorf("no palettes defined in palette file")
+	}
+
+	img, _, err := image.Decode(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode PNG: %w", err)
+	}
+
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	if width%8 != 0 || height%8 != 0 {
+		return nil, fmt.Errorf("PNG dimensions (%dx%d) must be multiples of 8", width, height)
+	}
+
+	tilesX := width / 8
+	tilesY := height / 8
+	totalTiles := tilesX * tilesY
+	chrData := make([]byte, totalTiles*16)
+
+	for ty := 0; ty < tilesY; ty++ {
+		for tx := 0; tx < tilesX; tx++ {
+			tileIdx := ty*tilesX + tx
+			tileOffset := tileIdx * 16
+			startX := bounds.Min.X + tx*8
+			startY := bounds.Min.Y + ty*8
+
+			// 1. Collect unique NES colors in this 8x8 tile
+			colorSet := make(map[byte]bool)
+			for y := 0; y < 8; y++ {
+				for x := 0; x < 8; x++ {
+					c := img.At(startX+x, startY+y)
+					nesCol := PixelToNESColor(c)
+					colorSet[nesCol] = true
+				}
+			}
+
+			// 2. Find a matching sub-palette from pal.Palettes
+			var matchedPal *SubPalette
+			for i := range pal.Palettes {
+				sub := &pal.Palettes[i]
+				allFound := true
+				for nesCol := range colorSet {
+					found := false
+					for _, sc := range sub.Colors {
+						if sc == nesCol {
+							found = true
+							break
+						}
+					}
+					if !found {
+						allFound = false
+						break
+					}
+				}
+				if allFound {
+					matchedPal = sub
+					break
+				}
+			}
+
+			if matchedPal == nil {
+				// Format offending color indexes
+				colorsList := make([]byte, 0, len(colorSet))
+				for nesCol := range colorSet {
+					colorsList = append(colorsList, nesCol)
+				}
+				sort.Slice(colorsList, func(i, j int) bool { return colorsList[i] < colorsList[j] })
+				var hexCols []string
+				for _, c := range colorsList {
+					hexCols = append(hexCols, fmt.Sprintf("$%02X", c))
+				}
+				return nil, fmt.Errorf("8x8 tile at (%d, %d) [tile #%d] cannot be placed in any palette; offending color indexes: %s",
+					tx, ty, tileIdx, strings.Join(hexCols, ", "))
+			}
+
+			// 3. Encode 8x8 tile using the matched sub-palette
+			out := chrData[tileOffset : tileOffset+16]
+			for y := 0; y < 8; y++ {
+				var p0, p1 byte
+				for x := 0; x < 8; x++ {
+					c := img.At(startX+x, startY+y)
+					nesCol := PixelToNESColor(c)
+					var colIdx byte
+					for idx, sc := range matchedPal.Colors {
+						if sc == nesCol {
+							colIdx = byte(idx)
+							break
+						}
+					}
+					bitPos := uint(7 - x)
+					p0 |= (colIdx & 1) << bitPos
+					p1 |= ((colIdx >> 1) & 1) << bitPos
+				}
+				out[y] = p0
+				out[y+8] = p1
+			}
+		}
+	}
+
+	return chrData, nil
 }
 
 // ConvertPNGToCHR converts a PNG image stream into standard NES 2BPP planar CHR data (16 bytes per 8x8 tile).

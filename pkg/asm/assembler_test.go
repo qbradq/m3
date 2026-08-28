@@ -207,15 +207,21 @@ func_b:
 }
 
 func TestIncchrAndIncpal(t *testing.T) {
-	// Create a temporary PNG file in memory / temp dir
+	// Create a temporary PNG file and companion PAL file in temp dir
 	tmpDir := t.TempDir()
 	pngPath := filepath.Join(tmpDir, "tile.png")
+	palPath := filepath.Join(tmpDir, "tile.pal")
+
+	palText := "0:\n$0F\n$06\n$0A\n$20\n"
+	if err := os.WriteFile(palPath, []byte(palText), 0644); err != nil {
+		t.Fatalf("failed to write temp pal: %v", err)
+	}
 
 	pal := color.Palette{
-		color.RGBA{0, 0, 0, 0},
-		color.RGBA{255, 0, 0, 255},
-		color.RGBA{0, 255, 0, 255},
-		color.RGBA{255, 255, 255, 255},
+		color.RGBA{0, 0, 0, 0},         // Transparent -> $0F
+		color.RGBA{84, 4, 0, 255},      // Reddish -> $06
+		color.RGBA{73, 170, 16, 255},   // Green -> $0A
+		color.RGBA{255, 255, 255, 255}, // White -> $20
 	}
 	img := image.NewPaletted(image.Rect(0, 0, 8, 8), pal)
 	for x := 0; x < 8; x++ {
@@ -233,11 +239,11 @@ func TestIncchrAndIncpal(t *testing.T) {
 	src := fmt.Sprintf(`
 .bank 0
 palette:
-    .incpal "%s", 4
+    .incpal "%s"
 
 tiles:
     .incchr "%s"
-`, pngPath, pngPath)
+`, palPath, pngPath)
 
 	objFile, err := Assemble("test_gfx.m3", src)
 	if err != nil {
@@ -249,23 +255,46 @@ tiles:
 	}
 
 	bank0 := objFile.Banks[0]
-	// 4 bytes for palette + 16 bytes for 1 tile = 20 bytes
-	if len(bank0.Data) != 20 {
-		t.Fatalf("expected 20 bytes, got %d", len(bank0.Data))
+	// 16 bytes for default palette + 16 bytes for 1 tile = 32 bytes
+	if len(bank0.Data) != 32 {
+		t.Fatalf("expected 32 bytes, got %d", len(bank0.Data))
 	}
 
-	// Verify palette header (first 4 bytes)
-	if bank0.Data[0] != 0x0F {
-		t.Errorf("expected palette[0] to be $0F, got $%02X", bank0.Data[0])
+	// Verify palette header (first 4 bytes from tile.pal, followed by 12 zeros)
+	if bank0.Data[0] != 0x0F || bank0.Data[1] != 0x06 || bank0.Data[2] != 0x0A || bank0.Data[3] != 0x20 {
+		t.Errorf("unexpected palette bytes: %v", bank0.Data[:4])
+	}
+	for i := 4; i < 16; i++ {
+		if bank0.Data[i] != 0 {
+			t.Errorf("expected padded zero at index %d, got $%02X", i, bank0.Data[i])
+		}
 	}
 
-	// Verify tile plane 0 row 0 (at offset 4)
-	if bank0.Data[4] != 0x55 {
-		t.Errorf("expected tile plane 0 row 0 to be 0x55, got 0x%02X", bank0.Data[4])
+	// Verify tile plane 0 row 0 (at offset 16)
+	if bank0.Data[16] != 0x55 {
+		t.Errorf("expected tile plane 0 row 0 to be 0x55, got 0x%02X", bank0.Data[16])
 	}
-	// Verify tile plane 1 row 0 (at offset 12)
-	if bank0.Data[12] != 0x33 {
-		t.Errorf("expected tile plane 1 row 0 to be 0x33, got 0x%02X", bank0.Data[12])
+	// Verify tile plane 1 row 0 (at offset 24)
+	if bank0.Data[24] != 0x33 {
+		t.Errorf("expected tile plane 1 row 0 to be 0x33, got 0x%02X", bank0.Data[24])
+	}
+
+	// Test explicit count of 8 bytes (4 bytes from file, 4 padded zeroes)
+	src8 := fmt.Sprintf(`.bank 0
+palette:
+    .incpal "%s", 8
+`, palPath)
+	objFile8, err := Assemble("test_count.m3", src8)
+	if err != nil {
+		t.Fatalf("assembly with explicit count failed: %v", err)
+	}
+	if len(objFile8.Banks[0].Data) != 8 {
+		t.Fatalf("expected 8 bytes, got %d", len(objFile8.Banks[0].Data))
+	}
+	for i := 4; i < 8; i++ {
+		if objFile8.Banks[0].Data[i] != 0 {
+			t.Errorf("expected zero pad at %d, got $%02X", i, objFile8.Banks[0].Data[i])
+		}
 	}
 }
 
