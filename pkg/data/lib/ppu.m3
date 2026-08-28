@@ -18,14 +18,6 @@ define (
     PPU_DATA   $2007
 )
 
-// Zero-page scratchpad variables for PPU streaming operations
-var (
-    pal_ptr    *uint8 zp
-    upload_src *uint8 zp
-    upload_dst uint16 zp
-    upload_len uint16 zp
-)
-
 // WaitForVBlank polls the PPU status register until the vertical blanking
 // interval starts.
 func WaitForVBlank() {
@@ -65,12 +57,12 @@ func Enable() {
 // DirectUploadPalette uploads the entire palette pointed to by pal to the PPU
 // immediately. Should only be called when the PPU is disabled.
 //
-// Fastcall Parameters (m3 ABI):
-//   pal: Low byte in A, High byte in X (or _ppu_pal_ptr in ZP)
+// Fastcall Parameters (3-byte register):
+//   pal: Registers A (low), X (high)
 func DirectUploadPalette(pal *uint8[32]) {
     asm {
-        STA _ppu_pal_ptr
-        STX _ppu_pal_ptr+1
+        STA __leaf_param0
+        STX __leaf_param1
 
         BIT $2002
         LDA #$3F
@@ -79,7 +71,7 @@ func DirectUploadPalette(pal *uint8[32]) {
         STA $2006
 
         LDY #$00
-    :   LDA (_ppu_pal_ptr), Y
+    :   LDA (__leaf_param0), Y
         STA $2007
         INY
         CPY #32
@@ -94,41 +86,44 @@ func DirectUploadPalette(pal *uint8[32]) {
 // DirectUpload streams len bytes from src directly into PPU VRAM starting at
 // ppu_dst. Should only be called when the PPU is disabled.
 //
-// Fastcall / Memory Parameters:
-//   src:     Source address pointer (_ppu_upload_src in ZP)
-//   ppu_dst: Target PPU VRAM address (_ppu_upload_dst in ZP)
-//   len:     Number of bytes to upload (_ppu_upload_len in ZP)
+// Fastcall Parameters (3-byte register + excess ZP):
+//   src:     Registers A (low), X (high)
+//   ppu_dst: __leaf_param0 (low), __leaf_param1 (high)
+//   len:     __leaf_param2 (low), __leaf_param3 (high)
 func DirectUpload(src *uint8[], ppu_dst, len uint16) {
     asm {
+        STA __leaf_param4
+        STX __leaf_param5
+
         BIT $2002
-        LDA _ppu_upload_dst+1
+        LDA __leaf_param1
         STA $2006
-        LDA _ppu_upload_dst
+        LDA __leaf_param0
         STA $2006
 
         ; Check if high byte of length > 0
-        LDX _ppu_upload_len+1
+        LDX __leaf_param3
         BEQ @copy_remainder
 
         ; Stream 256-byte full pages
     @page_loop:
         LDY #$00
     @page_byte:
-        LDA (_ppu_upload_src), Y
+        LDA (__leaf_param4), Y
         STA $2007
         INY
         BNE @page_byte
 
-        INC _ppu_upload_src+1
+        INC __leaf_param5
         DEX
         BNE @page_loop
 
     @copy_remainder:
-        LDX _ppu_upload_len
+        LDX __leaf_param2
         BEQ @done
         LDY #$00
     @rem_byte:
-        LDA (_ppu_upload_src), Y
+        LDA (__leaf_param4), Y
         STA $2007
         INY
         DEX

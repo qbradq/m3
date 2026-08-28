@@ -453,24 +453,7 @@ var (
 )
 
 func main() bank 0 {
-    asm {
-        LDA #<_main_buf_src
-        STA _memory_src_ptr
-        LDA #>_main_buf_src
-        STA _memory_src_ptr+1
-
-        LDA #<_main_buf_dst
-        STA _memory_dst_ptr
-        LDA #>_main_buf_dst
-        STA _memory_dst_ptr+1
-
-        LDA #64
-        STA _memory_len_cnt
-        LDA #0
-        STA _memory_len_cnt+1
-
-        JSR _memory_Copy
-    }
+    memory.Copy(buf_src, buf_dst, 64)
 }
 `
 	if err := os.WriteFile(mainPath, []byte(mainSrc), 0644); err != nil {
@@ -1021,8 +1004,8 @@ func main() bank 0 {
 	}
 
 	// Verify right-to-left evaluation order and use of _reg_x_shadow
-	if !strings.Contains(asmOutput, "STA _oam_spr_attr") {
-		t.Errorf("expected assembly to store 4th argument to _oam_spr_attr, got:\n%s", asmOutput)
+	if !strings.Contains(asmOutput, "STA __leaf_param0") {
+		t.Errorf("expected assembly to store 4th argument to __leaf_param0, got:\n%s", asmOutput)
 	}
 	if !strings.Contains(asmOutput, "STA _reg_x_shadow") {
 		t.Errorf("expected assembly to use _reg_x_shadow for Arg 1, got:\n%s", asmOutput)
@@ -1032,14 +1015,14 @@ func main() bank 0 {
 	}
 
 	// Check the first call: oam.PutSprite(enemies[i].x, enemies[i].y, 0, 0)
-	// Arg 3: LDA #0 -> STA _oam_spr_attr
+	// Arg 3: LDA #0 -> STA __leaf_param0
 	// Arg 2: LDY #0
 	// Arg 1: LDX _main_i -> LDA _main_enemies_y, X -> STA _reg_x_shadow
 	// Arg 0: LDX _main_i -> LDA _main_enemies_x, X
 	// Restore: LDX _reg_x_shadow
 	// Call: JSR _oam_PutSprite
 	expectedCallSequence := []string{
-		"STA _oam_spr_attr",
+		"STA __leaf_param0",
 		"LDY #0",
 		"LDA _main_enemies_y, X",
 		"STA _reg_x_shadow",
@@ -1054,6 +1037,56 @@ func main() bank 0 {
 			t.Fatalf("expected snippet %q after previous snippet in assembly:\n%s", seq, asmOutput)
 		}
 		lastIdx += idx + len(seq)
+	}
+}
+
+func TestReadOnlyFunctionParameters(t *testing.T) {
+	srcAssign := `
+package main
+func test(x uint8) {
+    x = 10
+}
+`
+	_, _, err := Compile("test.m3", srcAssign)
+	if err == nil || !strings.Contains(err.Error(), "cannot assign to parameter \"x\" (function parameters are read-only)") {
+		t.Fatalf("expected read-only parameter assignment error, got: %v", err)
+	}
+
+	srcInc := `
+package main
+func test(x uint8) {
+    x++
+}
+`
+	_, _, err = Compile("test.m3", srcInc)
+	if err == nil || !strings.Contains(err.Error(), "cannot assign to parameter \"x\" (function parameters are read-only)") {
+		t.Fatalf("expected read-only parameter inc/dec error, got: %v", err)
+	}
+}
+
+func TestLeafAndNonLeafParameterAllocation(t *testing.T) {
+	src := `
+package main
+
+func leaf_func(a, b, c uint8, d uint8) {
+}
+
+func non_leaf_func(a, b, c uint8, d uint8) {
+    leaf_func(a, b, c, d)
+}
+`
+	_, asmOutput, err := Compile("test.m3", src)
+	if err != nil {
+		t.Fatalf("Compile failed: %v", err)
+	}
+
+	// Non-leaf excess parameter d must be allocated in .ram
+	if !strings.Contains(asmOutput, "_main_non_leaf_func_d:\n  .res 1") {
+		t.Errorf("expected non-leaf excess param in .ram, got:\n%s", asmOutput)
+	}
+	// Leaf function excess param d should NOT be allocated in .ram
+	if strings.Contains(asmOutput, "_main_leaf_func_d:") {
+		t.Errorf("leaf function should not have dedicated .ram variable, got:\n%s", asmOutput)
 	}
 }
 

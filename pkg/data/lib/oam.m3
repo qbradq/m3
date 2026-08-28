@@ -39,11 +39,11 @@ func AdvanceFlicker() {
 // PutSprite writes a single 8x8 sprite into the OAM buffer at the next available
 // position and advances the write pointer by 4 bytes.
 //
-// Fastcall Parameters (m3 ABI):
+// Fastcall Parameters (3-byte register + excess ZP):
 //   x:    Accumulator A
 //   y:    Register X
 //   tile: Register Y
-//   attr: Memory __arg0 / _oam_spr_attr
+//   attr: __leaf_param0
 func PutSprite(x uint8, y uint8, tile uint8, attr uint8) {
     asm {
         JSR _oam_spr

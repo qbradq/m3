@@ -25,10 +25,6 @@ define (
 var (
     list_buf uint8[128] ram
     list_len uint8      zp
-    push_src *uint8     zp
-    push_dst uint16     zp
-    push_len uint8      zp
-    push_val uint8      zp
 )
 
 // Clear resets the display list write pointer to 0 and clears the buffer head.
@@ -43,17 +39,21 @@ func Clear() {
 // PushHorizontal buffers a command to copy len bytes from src to PPU RAM
 // starting at dest with horizontal (+1) auto-increment during the next VBlank.
 //
-// Fastcall / Memory Parameters:
-//   src:  Source address pointer (_ppu_driver_push_src in ZP)
-//   dest: Target PPU VRAM address (_ppu_driver_push_dst in ZP)
-//   len:  Number of bytes to copy (_ppu_driver_push_len in ZP)
+// Fastcall Parameters (3-byte register + excess ZP):
+//   src:  Registers A (low), X (high)
+//   dest: __leaf_param0 (low), __leaf_param1 (high)
+//   len:  __leaf_param2
 func PushHorizontal(src *uint8[], dest uint16, len uint8) {
     asm {
+        ; Save src address from A/X into scratch ZP
+        STA __leaf_param3
+        STX __leaf_param4
+
         ; Check if buffer has enough space: list_len + 4 + push_len <= 128
         LDA _ppu_driver_list_len
         CLC
         ADC #4
-        ADC _ppu_driver_push_len
+        ADC __leaf_param2
         BCS @skip_push
         CMP #129
         BCS @skip_push
@@ -66,30 +66,30 @@ func PushHorizontal(src *uint8[], dest uint16, len uint8) {
         INX
 
         ; 2. Destination PPU High Byte
-        LDA _ppu_driver_push_dst+1
+        LDA __leaf_param1
         STA _ppu_driver_list_buf, X
         INX
 
         ; 3. Destination PPU Low Byte
-        LDA _ppu_driver_push_dst
+        LDA __leaf_param0
         STA _ppu_driver_list_buf, X
         INX
 
         ; 4. Payload Length
-        LDA _ppu_driver_push_len
+        LDA __leaf_param2
         STA _ppu_driver_list_buf, X
         INX
 
-        ; 5. Copy payload bytes from push_src
+        ; 5. Copy payload bytes from src (__leaf_param3/4)
         LDY #$00
-        LDA _ppu_driver_push_len
+        LDA __leaf_param2
         BEQ @end_payload
     @payload_loop:
-        LDA (_ppu_driver_push_src), Y
+        LDA (__leaf_param3), Y
         STA _ppu_driver_list_buf, X
         INX
         INY
-        CPY _ppu_driver_push_len
+        CPY __leaf_param2
         BNE @payload_loop
 
     @end_payload:
@@ -105,17 +105,21 @@ func PushHorizontal(src *uint8[], dest uint16, len uint8) {
 // PushVertical buffers a command to copy len bytes from src to PPU RAM
 // starting at dest with vertical (+32) auto-increment during the next VBlank.
 //
-// Fastcall / Memory Parameters:
-//   src:  Source address pointer (_ppu_driver_push_src in ZP)
-//   dest: Target PPU VRAM address (_ppu_driver_push_dst in ZP)
-//   len:  Number of bytes to copy (_ppu_driver_push_len in ZP)
+// Fastcall Parameters (3-byte register + excess ZP):
+//   src:  Registers A (low), X (high)
+//   dest: __leaf_param0 (low), __leaf_param1 (high)
+//   len:  __leaf_param2
 func PushVertical(src *uint8[], dest uint16, len uint8) {
     asm {
+        ; Save src address from A/X into scratch ZP
+        STA __leaf_param3
+        STX __leaf_param4
+
         ; Check if buffer has enough space: list_len + 4 + push_len <= 128
         LDA _ppu_driver_list_len
         CLC
         ADC #4
-        ADC _ppu_driver_push_len
+        ADC __leaf_param2
         BCS @skip_push
         CMP #129
         BCS @skip_push
@@ -128,30 +132,30 @@ func PushVertical(src *uint8[], dest uint16, len uint8) {
         INX
 
         ; 2. Destination PPU High Byte
-        LDA _ppu_driver_push_dst+1
+        LDA __leaf_param1
         STA _ppu_driver_list_buf, X
         INX
 
         ; 3. Destination PPU Low Byte
-        LDA _ppu_driver_push_dst
+        LDA __leaf_param0
         STA _ppu_driver_list_buf, X
         INX
 
         ; 4. Payload Length
-        LDA _ppu_driver_push_len
+        LDA __leaf_param2
         STA _ppu_driver_list_buf, X
         INX
 
-        ; 5. Copy payload bytes from push_src
+        ; 5. Copy payload bytes from src (__leaf_param3/4)
         LDY #$00
-        LDA _ppu_driver_push_len
+        LDA __leaf_param2
         BEQ @end_payload
     @payload_loop:
-        LDA (_ppu_driver_push_src), Y
+        LDA (__leaf_param3), Y
         STA _ppu_driver_list_buf, X
         INX
         INY
-        CPY _ppu_driver_push_len
+        CPY __leaf_param2
         BNE @payload_loop
 
     @end_payload:
@@ -166,11 +170,15 @@ func PushVertical(src *uint8[], dest uint16, len uint8) {
 
 // PushByte buffers a single byte patch to PPU RAM at dest during the next VBlank.
 //
-// Fastcall / Memory Parameters:
-//   val:  Single byte value to write (_ppu_driver_push_val in ZP)
-//   dest: Target PPU VRAM address (_ppu_driver_push_dst in ZP)
+// Fastcall Parameters (3-byte register):
+//   val:  Register A
+//   dest: Register X (low), Register Y (high)
 func PushByte(val uint8, dest uint16) {
     asm {
+        STA __leaf_param0
+        STX __leaf_param1
+        STY __leaf_param2
+
         ; Check if buffer has enough space: list_len + 4 <= 128
         LDA _ppu_driver_list_len
         CLC
@@ -187,17 +195,17 @@ func PushByte(val uint8, dest uint16) {
         INX
 
         ; 2. Destination PPU High Byte
-        LDA _ppu_driver_push_dst+1
+        LDA __leaf_param2
         STA _ppu_driver_list_buf, X
         INX
 
         ; 3. Destination PPU Low Byte
-        LDA _ppu_driver_push_dst
+        LDA __leaf_param1
         STA _ppu_driver_list_buf, X
         INX
 
         ; 4. Single byte value
-        LDA _ppu_driver_push_val
+        LDA __leaf_param0
         STA _ppu_driver_list_buf, X
         INX
 
@@ -213,11 +221,14 @@ func PushByte(val uint8, dest uint16) {
 // PushPalette buffers a 32-byte palette update from src to PPU palette
 // RAM ($3F00) during the next VBlank.
 //
-// Fastcall / Memory Parameters:
-//   src: Source address pointer (_ppu_driver_push_src in ZP)
+// Fastcall Parameters (3-byte register):
+//   src: Registers A (low), X (high)
 func PushPalette(src *uint8[32]) {
     asm {
-        ; Check if buffer has enough space: list_len + 4 + 32 <= 128
+        STA __leaf_param0
+        STX __leaf_param1
+
+        ; Check if buffer has enough space: list_len + 36 <= 128
         LDA _ppu_driver_list_len
         CLC
         ADC #36
@@ -247,15 +258,15 @@ func PushPalette(src *uint8[32]) {
         STA _ppu_driver_list_buf, X
         INX
 
-        ; 5. Copy 32 payload bytes from push_src
+        ; 5. Copy 32 payload bytes from src (__leaf_param0/1)
         LDY #$00
-    @payload_loop:
-        LDA (_ppu_driver_push_src), Y
+    @palette_loop:
+        LDA (__leaf_param0), Y
         STA _ppu_driver_list_buf, X
         INX
         INY
         CPY #32
-        BNE @payload_loop
+        BNE @palette_loop
 
         ; Append CMD_END at current offset
         LDA #$00

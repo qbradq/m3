@@ -294,7 +294,7 @@ func Compile(filename, source string) (*SourceFile, string, error) {
 		return astFile, "", err
 	}
 
-	asmCode, err := generateAssembly(astFile)
+	asmCode, err := generateAssembly(astFile, funcMap)
 	if err != nil {
 		return astFile, "", err
 	}
@@ -312,6 +312,7 @@ func isPrimitiveType(name string) bool {
 }
 
 func validateAST(file *SourceFile, funcMap map[string]*FuncDecl) error {
+	var curFunc *FuncDecl
 	var walkExpr func(e Expr) error
 	var walkStmt func(s Stmt) error
 
@@ -392,11 +393,27 @@ func validateAST(file *SourceFile, funcMap map[string]*FuncDecl) error {
 		case *DefineDeclStmt:
 			return walkExpr(node.Decl.Value)
 		case *AssignStmt:
+			if ident, ok := node.Left.(*Ident); ok && curFunc != nil {
+				for _, p := range curFunc.Params {
+					if p.Name == ident.Name {
+						return fmt.Errorf("%s:%d:%d: cannot assign to parameter %q (function parameters are read-only)",
+							node.Pos().Filename, node.Pos().Line, node.Pos().Column, ident.Name)
+					}
+				}
+			}
 			if err := walkExpr(node.Left); err != nil {
 				return err
 			}
 			return walkExpr(node.Right)
 		case *IncDecStmt:
+			if ident, ok := node.Expr.(*Ident); ok && curFunc != nil {
+				for _, p := range curFunc.Params {
+					if p.Name == ident.Name {
+						return fmt.Errorf("%s:%d:%d: cannot assign to parameter %q (function parameters are read-only)",
+							node.Pos().Filename, node.Pos().Line, node.Pos().Column, ident.Name)
+					}
+				}
+			}
 			return walkExpr(node.Expr)
 		case *ShortVarDeclStmt:
 			return walkExpr(node.Value)
@@ -474,11 +491,13 @@ func validateAST(file *SourceFile, funcMap map[string]*FuncDecl) error {
 				return err
 			}
 		case *FuncDecl:
+			curFunc = d
 			if d.Body != nil {
 				if err := walkStmt(d.Body); err != nil {
 					return err
 				}
 			}
+			curFunc = nil
 		}
 	}
 
@@ -554,8 +573,177 @@ func CompileFile(inputFile, outputFile string) error {
 	return nil
 }
 
+func isLeafFunction(f *FuncDecl) bool {
+	if f == nil || f.Body == nil {
+		return true
+	}
+	return !containsCallExpr(f.Body)
+}
+
+func containsCallExpr(node Node) bool {
+	if node == nil {
+		return false
+	}
+	switch n := node.(type) {
+	case *CallExpr:
+		if ident, ok := n.Func.(*Ident); ok && isPrimitiveType(ident.Name) {
+			for _, arg := range n.Args {
+				if containsCallExpr(arg) {
+					return true
+				}
+			}
+			return false
+		}
+		return true
+	case *BlockStmt:
+		for _, s := range n.Stmts {
+			if containsCallExpr(s) {
+				return true
+			}
+		}
+	case *AssignStmt:
+		return containsCallExpr(n.Left) || containsCallExpr(n.Right)
+	case *IncDecStmt:
+		return containsCallExpr(n.Expr)
+	case *ShortVarDeclStmt:
+		return containsCallExpr(n.Value)
+	case *IfStmt:
+		if containsCallExpr(n.Init) || containsCallExpr(n.Cond) || containsCallExpr(n.Then) || containsCallExpr(n.Else) {
+			return true
+		}
+	case *ForStmt:
+		if containsCallExpr(n.Init) || containsCallExpr(n.Cond) || containsCallExpr(n.Post) || containsCallExpr(n.Body) {
+			return true
+		}
+	case *SwitchStmt:
+		if containsCallExpr(n.Expr) {
+			return true
+		}
+		for _, cc := range n.Cases {
+			for _, v := range cc.Values {
+				if containsCallExpr(v) {
+					return true
+				}
+			}
+			for _, s := range cc.Body {
+				if containsCallExpr(s) {
+					return true
+				}
+			}
+		}
+	case *ReturnStmt:
+		return containsCallExpr(n.Value)
+	case *ExprStmt:
+		return containsCallExpr(n.Expr)
+	case *UnaryExpr:
+		return containsCallExpr(n.Operand)
+	case *BinaryExpr:
+		return containsCallExpr(n.Left) || containsCallExpr(n.Right)
+	case *ParenExpr:
+		return containsCallExpr(n.Expr)
+	case *IndexExpr:
+		return containsCallExpr(n.Array) || containsCallExpr(n.Index)
+	case *MemberExpr:
+		return containsCallExpr(n.Target)
+	}
+	return false
+}
+
+func isAsmOnly(body *BlockStmt) bool {
+	if body == nil || len(body.Stmts) == 0 {
+		return false
+	}
+	for _, s := range body.Stmts {
+		if _, ok := s.(*AsmStmt); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+type ParamLocType int
+
+const (
+	ParamLocRegA ParamLocType = iota
+	ParamLocRegX
+	ParamLocRegY
+	ParamLocRegAX
+	ParamLocRegXY
+	ParamLocMemory
+)
+
+type ParamLocation struct {
+	Param   *Param
+	LocType ParamLocType
+	MemSym  string
+	Offset  int
+	Size    int
+}
+
+func computeParamLocations(f *FuncDecl, defaultPkg string) []ParamLocation {
+	pkg := f.Package
+	if pkg == "" {
+		pkg = defaultPkg
+	}
+	isLeaf := isLeafFunction(f)
+	var locs []ParamLocation
+	usedSlots := 0
+	excessOffset := 0
+
+	for _, p := range f.Params {
+		sz := typeSize(p.Type)
+		assignedReg := false
+
+		if sz == 1 && usedSlots < 3 {
+			switch usedSlots {
+			case 0:
+				locs = append(locs, ParamLocation{Param: p, LocType: ParamLocRegA, Size: 1})
+				usedSlots = 1
+				assignedReg = true
+			case 1:
+				locs = append(locs, ParamLocation{Param: p, LocType: ParamLocRegX, Size: 1})
+				usedSlots = 2
+				assignedReg = true
+			case 2:
+				locs = append(locs, ParamLocation{Param: p, LocType: ParamLocRegY, Size: 1})
+				usedSlots = 3
+				assignedReg = true
+			}
+		} else if sz == 2 {
+			if usedSlots == 0 {
+				locs = append(locs, ParamLocation{Param: p, LocType: ParamLocRegAX, Size: 2})
+				usedSlots = 2
+				assignedReg = true
+			} else if usedSlots == 1 {
+				locs = append(locs, ParamLocation{Param: p, LocType: ParamLocRegXY, Size: 2})
+				usedSlots = 3
+				assignedReg = true
+			}
+		}
+
+		if !assignedReg {
+			usedSlots = 3
+			var memSym string
+			if isLeaf {
+				memSym = fmt.Sprintf("__leaf_param%d", excessOffset)
+			} else {
+				memSym = fmt.Sprintf("_%s_%s_%s", pkg, f.Name, p.Name)
+			}
+			locs = append(locs, ParamLocation{
+				Param:   p,
+				LocType: ParamLocMemory,
+				MemSym:  memSym,
+				Offset:  excessOffset,
+				Size:    sz,
+			})
+			excessOffset += sz
+		}
+	}
+	return locs
+}
+
 // generateAssembly generates assembly source from the AST.
-func generateAssembly(file *SourceFile) (string, error) {
+func generateAssembly(file *SourceFile, funcMap map[string]*FuncDecl) (string, error) {
 	var sb strings.Builder
 
 	sb.WriteString("; =============================================================================\n")
@@ -612,6 +800,27 @@ func generateAssembly(file *SourceFile) (string, error) {
 			constDecls = append(constDecls, d)
 		case *FuncDecl:
 			funcDecls = append(funcDecls, d)
+		}
+	}
+
+	// Allocate dedicated RAM for excess parameters in non-leaf functions
+	for _, f := range funcDecls {
+		if !isLeafFunction(f) {
+			locs := computeParamLocations(f, file.PackageName)
+			for _, loc := range locs {
+				if loc.LocType == ParamLocMemory {
+					pkg := f.Package
+					if pkg == "" {
+						pkg = file.PackageName
+					}
+					ramVars = append(ramVars, &VarDecl{
+						Package: pkg,
+						Name:    fmt.Sprintf("%s_%s", f.Name, loc.Param.Name),
+						Type:    loc.Param.Type,
+						Storage: StorageRAM,
+					})
+				}
+			}
 		}
 	}
 
@@ -764,7 +973,7 @@ func generateAssembly(file *SourceFile) (string, error) {
 	// Functions / Procedures (Relocated to $A000-$BFFF)
 	if len(funcDecls) > 0 {
 		sb.WriteString("; Functions\n")
-		cg := newCodeGenerator(file, structMap, localVars)
+		cg := newCodeGenerator(file, structMap, localVars, funcMap)
 
 		for _, f := range funcDecls {
 			pkg := f.Package
@@ -780,6 +989,46 @@ func generateAssembly(file *SourceFile) (string, error) {
 			sb.WriteString(fmt.Sprintf(".proc %s\n", name))
 
 			cg.curFunc = f
+			cg.paramLocs = make(map[string]ParamLocation)
+			locs := computeParamLocations(f, file.PackageName)
+			isLeaf := isLeafFunction(f)
+			excessOffset := 0
+			for _, loc := range locs {
+				if loc.LocType == ParamLocMemory {
+					excessOffset += loc.Size
+				}
+			}
+			saveOffset := excessOffset
+			for _, loc := range locs {
+				if loc.LocType != ParamLocMemory {
+					if isLeaf {
+						loc.MemSym = fmt.Sprintf("__leaf_param%d", saveOffset)
+						saveOffset += loc.Size
+					} else {
+						loc.MemSym = fmt.Sprintf("_%s_%s_%s", pkg, f.Name, loc.Param.Name)
+					}
+				}
+				cg.paramLocs[loc.Param.Name] = loc
+			}
+
+			// Emit register parameter save prologue for M3 function bodies (not asm-only)
+			if f.Body != nil && len(f.Params) > 0 && !isAsmOnly(f.Body) {
+				for _, loc := range locs {
+					switch loc.LocType {
+					case ParamLocRegA:
+						sb.WriteString(fmt.Sprintf("  STA %s\n", loc.MemSym))
+					case ParamLocRegX:
+						sb.WriteString(fmt.Sprintf("  STX %s\n", loc.MemSym))
+					case ParamLocRegY:
+						sb.WriteString(fmt.Sprintf("  STY %s\n", loc.MemSym))
+					case ParamLocRegAX:
+						sb.WriteString(fmt.Sprintf("  STA %s\n  STX %s+1\n", loc.MemSym, loc.MemSym))
+					case ParamLocRegXY:
+						sb.WriteString(fmt.Sprintf("  STX %s\n  STY %s+1\n", loc.MemSym, loc.MemSym))
+					}
+				}
+			}
+
 			if f.Body != nil {
 				for _, stmt := range f.Body.Stmts {
 					cg.compileStmt(&sb, stmt)
@@ -898,16 +1147,20 @@ type codeGenerator struct {
 	file       *SourceFile
 	structMap  map[string]*StructType
 	localVars  map[string]*VarDecl
+	funcMap    map[string]*FuncDecl
 	curFunc    *FuncDecl
+	paramLocs  map[string]ParamLocation
 	labelCount int
 	loopStack  []loopInfo
 }
 
-func newCodeGenerator(file *SourceFile, structMap map[string]*StructType, localVars map[string]*VarDecl) *codeGenerator {
+func newCodeGenerator(file *SourceFile, structMap map[string]*StructType, localVars map[string]*VarDecl, funcMap map[string]*FuncDecl) *codeGenerator {
 	return &codeGenerator{
 		file:      file,
 		structMap: structMap,
 		localVars: localVars,
+		funcMap:   funcMap,
+		paramLocs: make(map[string]ParamLocation),
 	}
 }
 
@@ -1280,81 +1533,68 @@ func (cg *codeGenerator) compileCallExpr(sb *strings.Builder, call *CallExpr) {
 
 	mangledFunc := mangleSymbol(funcPkg, funcName)
 
-	// Special-case standard library signatures:
-	// 1. memory.Copy(src, dst, len) -> _memory_src_ptr, _memory_dst_ptr, _memory_len_cnt
-	if funcPkg == "memory" && funcName == "Copy" && len(call.Args) == 3 {
-		cg.emitPointerLoad(sb, call.Args[0], "_memory_src_ptr")
-		cg.emitPointerLoad(sb, call.Args[1], "_memory_dst_ptr")
-		cg.emitWordLoad(sb, call.Args[2], "_memory_len_cnt")
-		sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
-		return
+	var targetFn *FuncDecl
+	if funcPkg != "" {
+		targetFn = cg.funcMap[funcPkg+"."+funcName]
+	}
+	if targetFn == nil {
+		targetFn = cg.funcMap[funcName]
 	}
 
-	// 2. ppu.DirectUploadPalette(pal) -> A/X fastcall
-	if funcPkg == "ppu" && funcName == "DirectUploadPalette" && len(call.Args) == 1 {
-		cg.emitAddressIntoAX(sb, call.Args[0])
-		sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
-		return
-	}
+	if targetFn != nil && len(targetFn.Params) > 0 {
+		locs := computeParamLocations(targetFn, funcPkg)
 
-	// 3. ppu.DirectUpload(src, dst, len)
-	if funcPkg == "ppu" && funcName == "DirectUpload" && len(call.Args) == 3 {
-		cg.emitPointerLoad(sb, call.Args[0], "_ppu_upload_src")
-		cg.emitWordLoad(sb, call.Args[1], "_ppu_upload_dst")
-		cg.emitWordLoad(sb, call.Args[2], "_ppu_upload_len")
-		sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
-		return
-	}
-
-	// 4. ppu_driver.PushHorizontal(src, dest, len)
-	if funcPkg == "ppu_driver" && funcName == "PushHorizontal" && len(call.Args) == 3 {
-		cg.emitPointerLoad(sb, call.Args[0], "_ppu_driver_push_src")
-		cg.emitWordLoad(sb, call.Args[1], "_ppu_driver_push_dst")
-		cg.evalExprIntoA(sb, call.Args[2])
-		sb.WriteString("  STA _ppu_driver_push_len\n")
-		sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
-		return
-	}
-
-	// 5. ppu_driver.PushVertical(src, dest, len)
-	if funcPkg == "ppu_driver" && funcName == "PushVertical" && len(call.Args) == 3 {
-		cg.emitPointerLoad(sb, call.Args[0], "_ppu_driver_push_src")
-		cg.emitWordLoad(sb, call.Args[1], "_ppu_driver_push_dst")
-		cg.evalExprIntoA(sb, call.Args[2])
-		sb.WriteString("  STA _ppu_driver_push_len\n")
-		sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
-		return
-	}
-
-	// 6. ppu_driver.PushByte(val, dest)
-	if funcPkg == "ppu_driver" && funcName == "PushByte" && len(call.Args) == 2 {
-		cg.evalExprIntoA(sb, call.Args[0])
-		sb.WriteString("  STA _ppu_driver_push_val\n")
-		cg.emitWordLoad(sb, call.Args[1], "_ppu_driver_push_dst")
-		sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
-		return
-	}
-
-	// 7. ppu_driver.PushPalette(src)
-	if funcPkg == "ppu_driver" && funcName == "PushPalette" && len(call.Args) == 1 {
-		cg.emitPointerLoad(sb, call.Args[0], "_ppu_driver_push_src")
-		sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
-		return
-	}
-
-	// General Fastcall ABI (Evaluated Right-to-Left using register shadow variables):
-	// Arg 3+ -> memory (__arg0 / _oam_spr_attr)
-	// Arg 2  -> Y
-	// Arg 1  -> _reg_x_shadow (then restored into X)
-	// Arg 0  -> A
-	if len(call.Args) >= 4 {
-		if (funcPkg == "oam" || (cg.file.PackageName == "oam" && funcPkg == "oam")) && funcName == "PutSprite" {
-			cg.evalExprIntoA(sb, call.Args[3])
-			sb.WriteString("  STA _oam_spr_attr\n")
-		} else {
-			cg.evalExprIntoA(sb, call.Args[3])
-			sb.WriteString("  STA __arg0\n")
+		// 1. Evaluate memory / excess parameters first
+		for i, loc := range locs {
+			if loc.LocType == ParamLocMemory && i < len(call.Args) {
+				arg := call.Args[i]
+				if loc.Size == 1 {
+					cg.evalExprIntoA(sb, arg)
+					sb.WriteString(fmt.Sprintf("  STA %s\n", loc.MemSym))
+				} else if loc.Size == 2 {
+					cg.emitWordOrPointerLoad(sb, arg, loc.MemSym)
+				} else if loc.Size == 4 {
+					cg.emitDWordLoad(sb, arg, loc.MemSym)
+				}
+			}
 		}
+
+		// 2. Evaluate register parameters
+		for i, loc := range locs {
+			if i < len(call.Args) {
+				arg := call.Args[i]
+				switch loc.LocType {
+				case ParamLocRegY:
+					cg.evalExprIntoY(sb, arg)
+				case ParamLocRegX:
+					cg.evalExprIntoA(sb, arg)
+					sb.WriteString("  STA _reg_x_shadow\n")
+				case ParamLocRegA:
+					cg.evalExprIntoA(sb, arg)
+				case ParamLocRegAX:
+					cg.emitAddressIntoAX(sb, arg)
+				case ParamLocRegXY:
+					cg.emitAddressIntoXY(sb, arg)
+				}
+			}
+		}
+
+		// Restore X if _reg_x_shadow was set
+		for _, loc := range locs {
+			if loc.LocType == ParamLocRegX {
+				sb.WriteString("  LDX _reg_x_shadow\n")
+				break
+			}
+		}
+
+		sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
+		return
+	}
+
+	// Fallback for calls without parameter info (e.g. asm stubs)
+	if len(call.Args) >= 4 {
+		cg.evalExprIntoA(sb, call.Args[3])
+		sb.WriteString("  STA __leaf_param0\n")
 	}
 	if len(call.Args) >= 3 {
 		cg.evalExprIntoY(sb, call.Args[2])
@@ -1625,9 +1865,56 @@ func (cg *codeGenerator) emitPointerLoad(sb *strings.Builder, expr Expr, targetZ
 }
 
 func (cg *codeGenerator) emitAddressIntoAX(sb *strings.Builder, expr Expr) {
+	if num, ok := expr.(*NumberLit); ok {
+		sb.WriteString(fmt.Sprintf("  LDA #$%02X\n", num.Value&0xFF))
+		sb.WriteString(fmt.Sprintf("  LDX #$%02X\n", (num.Value>>8)&0xFF))
+		return
+	}
 	symStr := cg.formatRawSymbol(expr)
 	sb.WriteString(fmt.Sprintf("  LDA #<%s\n", symStr))
 	sb.WriteString(fmt.Sprintf("  LDX #>%s\n", symStr))
+}
+
+func (cg *codeGenerator) emitAddressIntoXY(sb *strings.Builder, expr Expr) {
+	if num, ok := expr.(*NumberLit); ok {
+		sb.WriteString(fmt.Sprintf("  LDX #$%02X\n", num.Value&0xFF))
+		sb.WriteString(fmt.Sprintf("  LDY #$%02X\n", (num.Value>>8)&0xFF))
+		return
+	}
+	symStr := cg.formatRawSymbol(expr)
+	sb.WriteString(fmt.Sprintf("  LDX #<%s\n", symStr))
+	sb.WriteString(fmt.Sprintf("  LDY #>%s\n", symStr))
+}
+
+func (cg *codeGenerator) emitWordOrPointerLoad(sb *strings.Builder, expr Expr, targetZP string) {
+	if num, ok := expr.(*NumberLit); ok {
+		cg.emitWordLoad(sb, num, targetZP)
+		return
+	}
+	cg.emitPointerLoad(sb, expr, targetZP)
+}
+
+func (cg *codeGenerator) emitDWordLoad(sb *strings.Builder, expr Expr, targetZP string) {
+	if num, ok := expr.(*NumberLit); ok {
+		sb.WriteString(fmt.Sprintf("  LDA #$%02X\n", num.Value&0xFF))
+		sb.WriteString(fmt.Sprintf("  STA %s\n", targetZP))
+		sb.WriteString(fmt.Sprintf("  LDA #$%02X\n", (num.Value>>8)&0xFF))
+		sb.WriteString(fmt.Sprintf("  STA %s+1\n", targetZP))
+		sb.WriteString(fmt.Sprintf("  LDA #$%02X\n", (num.Value>>16)&0xFF))
+		sb.WriteString(fmt.Sprintf("  STA %s+2\n", targetZP))
+		sb.WriteString(fmt.Sprintf("  LDA #$%02X\n", (num.Value>>24)&0xFF))
+		sb.WriteString(fmt.Sprintf("  STA %s+3\n", targetZP))
+		return
+	}
+	symStr := cg.formatRawSymbol(expr)
+	sb.WriteString(fmt.Sprintf("  LDA %s\n", symStr))
+	sb.WriteString(fmt.Sprintf("  STA %s\n", targetZP))
+	sb.WriteString(fmt.Sprintf("  LDA %s+1\n", symStr))
+	sb.WriteString(fmt.Sprintf("  STA %s+1\n", targetZP))
+	sb.WriteString(fmt.Sprintf("  LDA %s+2\n", symStr))
+	sb.WriteString(fmt.Sprintf("  STA %s+2\n", targetZP))
+	sb.WriteString(fmt.Sprintf("  LDA %s+3\n", symStr))
+	sb.WriteString(fmt.Sprintf("  STA %s+3\n", targetZP))
 }
 
 func (cg *codeGenerator) emitWordLoad(sb *strings.Builder, expr Expr, targetZP string) {
@@ -1683,7 +1970,13 @@ func (cg *codeGenerator) formatRawSymbol(expr Expr) string {
 }
 
 func (cg *codeGenerator) resolveSymbolName(name string) string {
-	// Check local variables in current function first
+	// Check parameters first
+	if cg.curFunc != nil && cg.paramLocs != nil {
+		if loc, ok := cg.paramLocs[name]; ok {
+			return loc.MemSym
+		}
+	}
+	// Check local variables in current function
 	if cg.curFunc != nil {
 		localMangled := fmt.Sprintf("%s_%s", cg.curFunc.Name, name)
 		if _, ok := cg.localVars[localMangled]; ok {

@@ -20,6 +20,7 @@
 .export oam_spr, _oam_spr, oam_put_sprite, _oam_put_sprite
 .export oam_off, _oam_off, oam_flicker_offset, _oam_flicker_offset, oam_spr_attr, _oam_spr_attr
 .export reg_a_shadow, reg_x_shadow, reg_y_shadow, _reg_a_shadow, _reg_x_shadow, _reg_y_shadow, __arg0
+.export __leaf_param0, __leaf_param1, __leaf_param2, __leaf_param3, __leaf_param4, __leaf_param5, __leaf_param6, __leaf_param7
 .import _main, _main_main
 .import _nmi
 .import _irq
@@ -35,6 +36,14 @@ reg_a_shadow:       .res 1      ; Register A shadow / temporary
 reg_x_shadow:       .res 1      ; Register X shadow / temporary
 reg_y_shadow:       .res 1      ; Register Y shadow / temporary
 __arg0:             .res 1      ; Fastcall 4th parameter scratchpad
+__leaf_param0:      .res 1      ; Reusable leaf function parameter / scratch slot 0
+__leaf_param1:      .res 1      ; Reusable leaf function parameter / scratch slot 1
+__leaf_param2:      .res 1      ; Reusable leaf function parameter / scratch slot 2
+__leaf_param3:      .res 1      ; Reusable leaf function parameter / scratch slot 3
+__leaf_param4:      .res 1      ; Reusable leaf function parameter / scratch slot 4
+__leaf_param5:      .res 1      ; Reusable leaf function parameter / scratch slot 5
+__leaf_param6:      .res 1      ; Reusable leaf function parameter / scratch slot 6
+__leaf_param7:      .res 1      ; Reusable leaf function parameter / scratch slot 7
 
 ; ==============================================================================
 ; Hardware Register Definitions
@@ -303,8 +312,8 @@ oam_spr:
     STA $0200, X                ; Byte 1: Tile index
     INX
 
-    LDA oam_spr_attr
-    STA $0200, X                ; Byte 2: Attributes
+    LDA __leaf_param0           ; Byte 2: Attributes
+    STA $0200, X
     INX
 
     PLA

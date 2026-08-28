@@ -394,14 +394,16 @@ func identifier(param1 type, param2 type) return_type [bank n] {
 
 To avoid the overhead of software stack frames, `m3` uses a high-performance calling convention:
 
-1. **Register Fastcall**:
-   - The first 8-bit parameter is passed in the **`A`** accumulator.
-   - The second 8-bit parameter is passed in the **`X`** register.
-   - The third 8-bit parameter is passed in the **`Y`** register.
-2. **Static Zero Page Scratchpad Overlay**:
-   - Additional parameters or 16-bit/32-bit values are passed via compiler-managed Zero Page scratchpad locations (`__arg0`, `__arg1`, ...).
-   - Functions that do not call each other share overlapping parameter and local variable scratchpad space.
-3. **Return Values**:
+1. **Read-Only Parameters**:
+   - Function parameters are immutable and cannot be assigned or modified (`=`, `++`, `--`, etc.).
+2. **3-Byte Register Fastcall**:
+   - Up to 3 bytes of parameters are packed into CPU registers (`A`, `X`, `Y`).
+   - 1-byte parameters (`uint8`, `bool`) take `A`, then `X`, then `Y`.
+   - 2-byte parameters (`uint16`, pointers/slices) take `A` (low) + `X` (high), or `X` (low) + `Y` (high).
+3. **Excess Parameter Storage**:
+   - **Leaf Functions** (functions that make no function calls) use shared, reusable zero-page scratchpad slots (`__leaf_param0`, `__leaf_param1`, ...).
+   - **Non-Leaf Functions** (functions that call other functions) use dedicated variables in `.ram` ($0300-$07FF) named `_<pkg>_<func>_<param>` to prevent clobbering across nested calls.
+4. **Return Values**:
    - 8-bit results return in **`A`**.
    - 16-bit results return in **`A`** (low byte) and **`X`** (high byte).
 
