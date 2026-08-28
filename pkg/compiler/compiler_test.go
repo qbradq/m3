@@ -989,4 +989,79 @@ func main() bank 0 {
 	}
 }
 
+func TestFunctionCallRightToLeftParameters(t *testing.T) {
+	src := `
+package main
+
+import "oam.m3"
+
+type Enemy struct {
+    x uint8
+    y uint8
+}
+
+var (
+    enemies Enemy[8] ram
+    i uint8 zp
+)
+
+func main() bank 0 {
+    oam.PutSprite(enemies[i].x, enemies[i].y, 0, 0)
+    oam.PutSprite(0, enemies[0].y, 0, 0)
+    oam.PutSprite(enemies[i].x+8, enemies[i].y+8, 16, 0)
+}
+`
+	_, asmOutput, err := Compile("main.m3", src)
+	if err != nil {
+		t.Fatalf("compilation failed: %v", err)
+	}
+
+	// Verify right-to-left evaluation order and use of _reg_x_shadow
+	if !strings.Contains(asmOutput, "STA _oam_spr_attr") {
+		t.Errorf("expected assembly to store 4th argument to _oam_spr_attr, got:\n%s", asmOutput)
+	}
+	if !strings.Contains(asmOutput, "STA _reg_x_shadow") {
+		t.Errorf("expected assembly to use _reg_x_shadow for Arg 1, got:\n%s", asmOutput)
+	}
+	if !strings.Contains(asmOutput, "LDX _reg_x_shadow") {
+		t.Errorf("expected assembly to restore Arg 1 from _reg_x_shadow into X, got:\n%s", asmOutput)
+	}
+
+	// Check the first call: oam.PutSprite(enemies[i].x, enemies[i].y, 0, 0)
+	// Arg 3: LDA #0 -> STA _oam_spr_attr
+	// Arg 2: LDY #0
+	// Arg 1: LDX _main_i -> LDA _main_enemies_y, X -> STA _reg_x_shadow
+	// Arg 0: LDX _main_i -> LDA _main_enemies_x, X
+	// Restore: LDX _reg_x_shadow
+	// Call: JSR _oam_PutSprite
+	expectedCallSequence := []string{
+		"STA _oam_spr_attr",
+		"LDY #0",
+		"LDA _main_enemies_y, X",
+		"STA _reg_x_shadow",
+		"LDA _main_enemies_x, X",
+		"LDX _reg_x_shadow",
+		"JSR _oam_PutSprite",
+	}
+	lastIdx := 0
+	for _, seq := range expectedCallSequence {
+		idx := strings.Index(asmOutput[lastIdx:], seq)
+		if idx == -1 {
+			t.Fatalf("expected snippet %q after previous snippet in assembly:\n%s", seq, asmOutput)
+		}
+		lastIdx += idx + len(seq)
+	}
+}
+
+func TestBuildGameWithSpriteCalls(t *testing.T) {
+	gamePath := filepath.Join("..", "..", "examples", "game.m3")
+	rom, err := Build([]string{gamePath})
+	if err != nil {
+		t.Fatalf("Build game.m3 failed: %v", err)
+	}
+	if len(rom) != 16+64*8192 {
+		t.Fatalf("expected ROM size %d, got %d", 16+64*8192, len(rom))
+	}
+}
+
 

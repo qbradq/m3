@@ -1335,21 +1335,60 @@ func (cg *codeGenerator) compileCallExpr(sb *strings.Builder, call *CallExpr) {
 		return
 	}
 
-	// General Fastcall ABI:
-	// Arg 0 -> A
-	// Arg 1 -> X
-	// Arg 2 -> Y
-	if len(call.Args) >= 1 {
-		cg.evalExprIntoA(sb, call.Args[0])
-	}
-	if len(call.Args) >= 2 {
-		cg.evalExprIntoX(sb, call.Args[1])
+	// General Fastcall ABI (Evaluated Right-to-Left using register shadow variables):
+	// Arg 3+ -> memory (__arg0 / _oam_spr_attr)
+	// Arg 2  -> Y
+	// Arg 1  -> _reg_x_shadow (then restored into X)
+	// Arg 0  -> A
+	if len(call.Args) >= 4 {
+		if (funcPkg == "oam" || (cg.file.PackageName == "oam" && funcPkg == "oam")) && funcName == "PutSprite" {
+			cg.evalExprIntoA(sb, call.Args[3])
+			sb.WriteString("  STA _oam_spr_attr\n")
+		} else {
+			cg.evalExprIntoA(sb, call.Args[3])
+			sb.WriteString("  STA __arg0\n")
+		}
 	}
 	if len(call.Args) >= 3 {
 		cg.evalExprIntoY(sb, call.Args[2])
 	}
+	if len(call.Args) >= 2 {
+		cg.evalExprIntoA(sb, call.Args[1])
+		sb.WriteString("  STA _reg_x_shadow\n")
+	}
+	if len(call.Args) >= 1 {
+		cg.evalExprIntoA(sb, call.Args[0])
+	}
+	if len(call.Args) >= 2 {
+		sb.WriteString("  LDX _reg_x_shadow\n")
+	}
 
 	sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
+}
+
+func (cg *codeGenerator) emitJumpIf(sb *strings.Builder, branchMnemonic string, targetLabel string) {
+	skip := cg.newLabel("skip_br")
+	var opp string
+	switch branchMnemonic {
+	case "BEQ":
+		opp = "BNE"
+	case "BNE":
+		opp = "BEQ"
+	case "BCC":
+		opp = "BCS"
+	case "BCS":
+		opp = "BCC"
+	case "BMI":
+		opp = "BPL"
+	case "BPL":
+		opp = "BMI"
+	default:
+		sb.WriteString(fmt.Sprintf("  %s %s\n", branchMnemonic, targetLabel))
+		return
+	}
+	sb.WriteString(fmt.Sprintf("  %s %s\n", opp, skip))
+	sb.WriteString(fmt.Sprintf("  JMP %s\n", targetLabel))
+	sb.WriteString(fmt.Sprintf("%s:\n", skip))
 }
 
 func (cg *codeGenerator) compileConditionBranch(sb *strings.Builder, cond Expr, targetLabel string, branchOnTrue bool) {
@@ -1364,47 +1403,59 @@ func (cg *codeGenerator) compileConditionBranch(sb *strings.Builder, cond Expr, 
 		switch bin.Op {
 		case TokenEqEq:
 			if branchOnTrue {
-				sb.WriteString(fmt.Sprintf("  BEQ %s\n", targetLabel))
+				cg.emitJumpIf(sb, "BEQ", targetLabel)
 			} else {
-				sb.WriteString(fmt.Sprintf("  BNE %s\n", targetLabel))
+				cg.emitJumpIf(sb, "BNE", targetLabel)
 			}
 		case TokenBangEq:
 			if branchOnTrue {
-				sb.WriteString(fmt.Sprintf("  BNE %s\n", targetLabel))
+				cg.emitJumpIf(sb, "BNE", targetLabel)
 			} else {
-				sb.WriteString(fmt.Sprintf("  BEQ %s\n", targetLabel))
+				cg.emitJumpIf(sb, "BEQ", targetLabel)
 			}
 		case TokenLt:
 			if branchOnTrue {
-				sb.WriteString(fmt.Sprintf("  BCC %s\n", targetLabel))
+				cg.emitJumpIf(sb, "BCC", targetLabel)
 			} else {
-				sb.WriteString(fmt.Sprintf("  BCS %s\n", targetLabel))
+				cg.emitJumpIf(sb, "BCS", targetLabel)
 			}
 		case TokenLtEq:
 			if branchOnTrue {
-				sb.WriteString(fmt.Sprintf("  BEQ %s\n", targetLabel))
-				sb.WriteString(fmt.Sprintf("  BCC %s\n", targetLabel))
+				take := cg.newLabel("take_br")
+				skip := cg.newLabel("skip_br")
+				sb.WriteString(fmt.Sprintf("  BEQ %s\n", take))
+				sb.WriteString(fmt.Sprintf("  BCS %s\n", skip))
+				sb.WriteString(fmt.Sprintf("%s:\n", take))
+				sb.WriteString(fmt.Sprintf("  JMP %s\n", targetLabel))
+				sb.WriteString(fmt.Sprintf("%s:\n", skip))
 			} else {
 				skip := cg.newLabel("skip_cmp")
 				sb.WriteString(fmt.Sprintf("  BEQ %s\n", skip))
-				sb.WriteString(fmt.Sprintf("  BCS %s\n", targetLabel))
+				sb.WriteString(fmt.Sprintf("  BCC %s\n", skip))
+				sb.WriteString(fmt.Sprintf("  JMP %s\n", targetLabel))
 				sb.WriteString(fmt.Sprintf("%s:\n", skip))
 			}
 		case TokenGt:
 			if branchOnTrue {
 				skip := cg.newLabel("skip_cmp")
 				sb.WriteString(fmt.Sprintf("  BEQ %s\n", skip))
-				sb.WriteString(fmt.Sprintf("  BCS %s\n", targetLabel))
+				sb.WriteString(fmt.Sprintf("  BCC %s\n", skip))
+				sb.WriteString(fmt.Sprintf("  JMP %s\n", targetLabel))
 				sb.WriteString(fmt.Sprintf("%s:\n", skip))
 			} else {
-				sb.WriteString(fmt.Sprintf("  BEQ %s\n", targetLabel))
-				sb.WriteString(fmt.Sprintf("  BCC %s\n", targetLabel))
+				take := cg.newLabel("take_br")
+				skip := cg.newLabel("skip_br")
+				sb.WriteString(fmt.Sprintf("  BEQ %s\n", take))
+				sb.WriteString(fmt.Sprintf("  BCS %s\n", skip))
+				sb.WriteString(fmt.Sprintf("%s:\n", take))
+				sb.WriteString(fmt.Sprintf("  JMP %s\n", targetLabel))
+				sb.WriteString(fmt.Sprintf("%s:\n", skip))
 			}
 		case TokenGtEq:
 			if branchOnTrue {
-				sb.WriteString(fmt.Sprintf("  BCS %s\n", targetLabel))
+				cg.emitJumpIf(sb, "BCS", targetLabel)
 			} else {
-				sb.WriteString(fmt.Sprintf("  BCC %s\n", targetLabel))
+				cg.emitJumpIf(sb, "BCC", targetLabel)
 			}
 		}
 		return
@@ -1413,9 +1464,9 @@ func (cg *codeGenerator) compileConditionBranch(sb *strings.Builder, cond Expr, 
 	// Boolean variable or member expression: e.g. enemies[i].active
 	cg.evalExprIntoA(sb, cond)
 	if branchOnTrue {
-		sb.WriteString(fmt.Sprintf("  BNE %s\n", targetLabel))
+		cg.emitJumpIf(sb, "BNE", targetLabel)
 	} else {
-		sb.WriteString(fmt.Sprintf("  BEQ %s\n", targetLabel))
+		cg.emitJumpIf(sb, "BEQ", targetLabel)
 	}
 }
 
@@ -1466,6 +1517,20 @@ func (cg *codeGenerator) evalExprIntoA(sb *strings.Builder, expr Expr) {
 		} else if e.Op == TokenGt {
 			symStr := cg.formatRawSymbol(e.Operand)
 			sb.WriteString(fmt.Sprintf("  LDA #>%s\n", symStr))
+		}
+	case *BinaryExpr:
+		cg.evalExprIntoA(sb, e.Left)
+		switch e.Op {
+		case TokenPlus:
+			sb.WriteString("  CLC\n")
+			cg.emitAddA(sb, e.Right)
+		case TokenMinus:
+			sb.WriteString("  SEC\n")
+			cg.emitSubA(sb, e.Right)
+		case TokenAmp:
+			cg.emitAndA(sb, e.Right)
+		case TokenPipe:
+			cg.emitOrA(sb, e.Right)
 		}
 	case *CallExpr:
 		// Type cast like uint8(0)

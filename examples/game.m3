@@ -109,6 +109,9 @@ func main() {
         for i := uint8(0); i < 8; i++ {
             if enemies[i].active {
                 oam.PutSprite(enemies[i].x, enemies[i].y, 0, 0)
+                oam.PutSprite(enemies[i].x, enemies[i].y+8, 16, 0)
+                oam.PutSprite(enemies[i].x+8, enemies[i].y, 1, 0)
+                oam.PutSprite(enemies[i].x+8, enemies[i].y+8, 17, 0)
             }
         }
     }

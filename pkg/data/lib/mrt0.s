@@ -19,6 +19,7 @@
 .export oam_advance_flicker, _oam_advance_flicker, oam_flicker, _oam_flicker
 .export oam_spr, _oam_spr, oam_put_sprite, _oam_put_sprite
 .export oam_off, _oam_off, oam_flicker_offset, _oam_flicker_offset, oam_spr_attr, _oam_spr_attr
+.export reg_a_shadow, reg_x_shadow, reg_y_shadow, _reg_a_shadow, _reg_x_shadow, _reg_y_shadow, __arg0
 .import _main, _main_main
 .import _nmi
 .import _irq
@@ -30,6 +31,10 @@
 oam_off:            .res 1      ; Current OAM buffer write offset ($00-$FC)
 oam_flicker_offset: .res 1      ; Anti-flicker frame starting offset ($00-$FC)
 oam_spr_attr:       .res 1      ; Attribute argument for oam_spr
+reg_a_shadow:       .res 1      ; Register A shadow / temporary
+reg_x_shadow:       .res 1      ; Register X shadow / temporary
+reg_y_shadow:       .res 1      ; Register Y shadow / temporary
+__arg0:             .res 1      ; Fastcall 4th parameter scratchpad
 
 ; ==============================================================================
 ; Hardware Register Definitions

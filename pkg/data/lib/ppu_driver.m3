@@ -233,7 +233,7 @@ func Process() {
 
     @exec_horiz:
         ; PPU_CTRL with +1 increment
-        LDA #%10000000
+        LDA #%10001000
         STA $2000
 
         ; Set PPU destination address
@@ -257,7 +257,7 @@ func Process() {
 
     @exec_vert:
         ; PPU_CTRL with +32 increment
-        LDA #%10000100
+        LDA #%10001100
         STA $2000
 
         ; Set PPU destination address
@@ -281,7 +281,7 @@ func Process() {
 
     @exec_byte:
         ; PPU_CTRL with +1 increment
-        LDA #%10000000
+        LDA #%10001000
         STA $2000
 
         ; Set PPU destination address
@@ -300,7 +300,7 @@ func Process() {
 
     @done:
         ; Restore default PPU_CTRL (+1 increment, NMI enabled)
-        LDA #%10000000
+        LDA #%10001000
         STA $2000
 
         ; Reset PPU scroll ($00, $00)

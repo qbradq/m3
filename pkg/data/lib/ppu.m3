@@ -45,7 +45,7 @@ func Enable() {
         BIT $2002
         LDA #%00011110
         STA $2001
-        LDA #%10000000
+        LDA #%10001000
         STA $2000
         LDA #$00
         STA $2005
