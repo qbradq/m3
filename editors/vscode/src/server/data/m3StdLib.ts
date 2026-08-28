@@ -21,6 +21,15 @@ var (
     upload_len uint16 zp
 )
 
+// WaitForVBlank polls the PPU status register until the vertical blanking
+// interval starts.
+func WaitForVBlank() {
+    asm {
+    :   BIT $2002
+        BPL :-
+    }
+}
+
 // Disable turns the screen and NMI processing off at the end of the next
 // NMI. Waits until the end of the next NMI before returning.
 func Disable() {
@@ -271,6 +280,11 @@ func PushVertical(src *uint8[], dest uint16, len uint8) {
 
 // PushByte buffers a single byte patch to PPU RAM at dest during the next VBlank.
 func PushByte(val uint8, dest uint16) {
+}
+
+// PushPalette buffers a 32-byte palette update from src to PPU palette
+// RAM ($3F00) during the next VBlank.
+func PushPalette(src *uint8[32]) {
 }
 
 // Process iterates over all buffered display list commands, executes the PPU

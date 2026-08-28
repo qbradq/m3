@@ -26,6 +26,15 @@ var (
     upload_len uint16 zp
 )
 
+// WaitForVBlank polls the PPU status register until the vertical blanking
+// interval starts.
+func WaitForVBlank() {
+    asm {
+    :   BIT $2002
+        BPL :-
+    }
+}
+
 // Disable turns the screen and NMI processing off at the end of the next
 // NMI. Waits until the end of the next NMI before returning.
 func Disable() {

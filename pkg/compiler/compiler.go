@@ -1335,6 +1335,13 @@ func (cg *codeGenerator) compileCallExpr(sb *strings.Builder, call *CallExpr) {
 		return
 	}
 
+	// 7. ppu_driver.PushPalette(src)
+	if funcPkg == "ppu_driver" && funcName == "PushPalette" && len(call.Args) == 1 {
+		cg.emitPointerLoad(sb, call.Args[0], "_ppu_driver_push_src")
+		sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
+		return
+	}
+
 	// General Fastcall ABI (Evaluated Right-to-Left using register shadow variables):
 	// Arg 3+ -> memory (__arg0 / _oam_spr_attr)
 	// Arg 2  -> Y

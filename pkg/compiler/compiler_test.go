@@ -962,7 +962,10 @@ package main
 
 import "ppu_driver.m3"
 
-var msg uint8[16] ram
+var (
+    msg uint8[16] ram
+    pal uint8[32] ram
+)
 
 func nmi() bank 63 {
     ppu_driver.Process()
@@ -973,6 +976,7 @@ func main() bank 0 {
     ppu_driver.PushHorizontal(msg, $2000, 16)
     ppu_driver.PushVertical(msg, $2020, 8)
     ppu_driver.PushByte($42, $23C0)
+    ppu_driver.PushPalette(pal)
 }
 `
 	if err := os.WriteFile(mainPath, []byte(mainSrc), 0644); err != nil {

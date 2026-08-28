@@ -667,10 +667,12 @@ Buffered PPU VRAM patching driver for executing transfers during VBlank while re
 - `ppu_driver.PushHorizontal(src *uint8[], dest uint16, len uint8)`: Buffers a copy of `len` bytes from `src` to PPU VRAM starting at `dest` using horizontal (+1) increment.
 - `ppu_driver.PushVertical(src *uint8[], dest uint16, len uint8)`: Buffers a copy of `len` bytes from `src` to PPU VRAM starting at `dest` using vertical (+32) increment.
 - `ppu_driver.PushByte(val uint8, dest uint16)`: Buffers a single byte patch to PPU VRAM address `dest`.
+- `ppu_driver.PushPalette(src *uint8[32])`: Buffers a 32-byte palette update from `src` to PPU palette memory ($3F00).
 - `ppu_driver.Process()`: Flushes all queued commands into PPU RAM and resets scroll. Must be called from the user's NMI handler during VBlank.
 
 ### 12.2 `ppu.m3` - PPU Control & Palette Management
 PPU control routines for use during startup or when rendering is turned off.
+- `ppu.WaitForVBlank()`: Polls the PPU status register until the vertical blanking interval begins.
 - `ppu.Disable()`: Waits for end of next NMI and turns screen rendering off.
 - `ppu.Enable()`: Enables screen rendering and NMI generation.
 - `ppu.DirectUploadPalette(pal *uint8[32])`: Directly uploads 32 palette bytes to PPU palette memory ($3F00).

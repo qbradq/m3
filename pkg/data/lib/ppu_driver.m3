@@ -210,6 +210,62 @@ func PushByte(val uint8, dest uint16) {
     }
 }
 
+// PushPalette buffers a 32-byte palette update from src to PPU palette
+// RAM ($3F00) during the next VBlank.
+//
+// Fastcall / Memory Parameters:
+//   src: Source address pointer (_ppu_driver_push_src in ZP)
+func PushPalette(src *uint8[32]) {
+    asm {
+        ; Check if buffer has enough space: list_len + 4 + 32 <= 128
+        LDA _ppu_driver_list_len
+        CLC
+        ADC #36
+        BCS @skip_push
+        CMP #129
+        BCS @skip_push
+
+        LDX _ppu_driver_list_len
+
+        ; 1. Command ID (CMD_HORIZ)
+        LDA #$01
+        STA _ppu_driver_list_buf, X
+        INX
+
+        ; 2. Destination PPU High Byte ($3F)
+        LDA #$3F
+        STA _ppu_driver_list_buf, X
+        INX
+
+        ; 3. Destination PPU Low Byte ($00)
+        LDA #$00
+        STA _ppu_driver_list_buf, X
+        INX
+
+        ; 4. Payload Length (32)
+        LDA #32
+        STA _ppu_driver_list_buf, X
+        INX
+
+        ; 5. Copy 32 payload bytes from push_src
+        LDY #$00
+    @payload_loop:
+        LDA (_ppu_driver_push_src), Y
+        STA _ppu_driver_list_buf, X
+        INX
+        INY
+        CPY #32
+        BNE @payload_loop
+
+        ; Append CMD_END at current offset
+        LDA #$00
+        STA _ppu_driver_list_buf, X
+        STX _ppu_driver_list_len
+
+    @skip_push:
+    }
+}
+
 // Process iterates over all buffered display list commands, executes the PPU
 // transfers, and clears the display list. Must be called during VBlank from the
 // NMI handler with PPU enabled.
