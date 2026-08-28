@@ -269,5 +269,5 @@ func TestRealAssetsConversion(t *testing.T) {
 
 	inspect("font", "../../examples/data/font.pal", "../../examples/data/font.png")
 	inspect("sprites", "../../examples/data/sprites.pal", "../../examples/data/sprites.png")
-	inspect("tiles_surface", "../../game/src/data/tiles_surface.pal", "../../game/src/data/tiles_surface.png")
+	inspect("tiles_surface", "../../game/src/data/gfx/tiles_surface.pal", "../../game/src/data/gfx/tiles_surface.png")
 }

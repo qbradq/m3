@@ -471,6 +471,25 @@ type ArrayLit struct {
 func (a *ArrayLit) Pos() Position { return a.pos }
 func (a *ArrayLit) exprNode()     {}
 
+// StructLitField represents a single field in a struct literal: member: value
+type StructLitField struct {
+	Name  string
+	Value Expr
+	pos   Position
+}
+
+func (f *StructLitField) Pos() Position { return f.pos }
+
+// StructLit represents a struct literal: { member: value, member2: value2 }
+type StructLit struct {
+	Type   TypeSpec // Optional type
+	Fields []*StructLitField
+	pos    Position
+}
+
+func (s *StructLit) Pos() Position { return s.pos }
+func (s *StructLit) exprNode()     {}
+
 // UnaryExpr represents a unary operation: +x, -x, !x, ^x, *x, &x, <x, >x, etc.
 type UnaryExpr struct {
 	Op      TokenType

@@ -360,6 +360,12 @@ func validateAST(file *SourceFile, funcMap map[string]*FuncDecl) error {
 			return walkExpr(node.Target)
 		case *IncpalExpr:
 			return walkExpr(node.Count)
+		case *StructLit:
+			for _, f := range node.Fields {
+				if err := walkExpr(f.Value); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	}
@@ -645,6 +651,18 @@ func containsCallExpr(node Node) bool {
 		return containsCallExpr(n.Array) || containsCallExpr(n.Index)
 	case *MemberExpr:
 		return containsCallExpr(n.Target)
+	case *ArrayLit:
+		for _, el := range n.Elements {
+			if containsCallExpr(el) {
+				return true
+			}
+		}
+	case *StructLit:
+		for _, f := range n.Fields {
+			if containsCallExpr(f.Value) {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -893,32 +911,8 @@ func generateAssembly(file *SourceFile, funcMap map[string]*FuncDecl) (string, e
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
 			sb.WriteString(fmt.Sprintf("%s:\n", name))
-			if strLit, ok := d.Value.(*StringLit); ok {
-				sb.WriteString(fmt.Sprintf("  .asciiz %q\n", strLit.Value))
-			} else if arrLit, ok := d.Value.(*ArrayLit); ok {
-				var items []string
-				for _, elem := range arrLit.Elements {
-					if n, ok := elem.(*NumberLit); ok {
-						items = append(items, fmt.Sprintf("$%02X", n.Value&0xFF))
-					} else {
-						items = append(items, "0")
-					}
-				}
-				if len(items) > 0 {
-					sb.WriteString(fmt.Sprintf("  .byte %s\n", strings.Join(items, ", ")))
-				}
-			} else if numLit, ok := d.Value.(*NumberLit); ok {
-				sb.WriteString(fmt.Sprintf("  .word $%04X\n", numLit.Value))
-			} else if incbin, ok := d.Value.(*IncbinExpr); ok {
-				sb.WriteString(fmt.Sprintf("  .incbin %q\n", incbin.Path))
-			} else if incchr, ok := d.Value.(*IncchrExpr); ok {
-				sb.WriteString(fmt.Sprintf("  .incchr %q\n", incchr.Path))
-			} else if incpal, ok := d.Value.(*IncpalExpr); ok {
-				if incpal.Count != nil {
-					sb.WriteString(fmt.Sprintf("  .incpal %q, %s\n", incpal.Path, formatConstExpr(incpal.Count, pkg)))
-				} else {
-					sb.WriteString(fmt.Sprintf("  .incpal %q\n", incpal.Path))
-				}
+			if err := emitConstDataDeclValue(&sb, d.Value, d.Type, structMap, pkg); err != nil {
+				return "", err
 			}
 			sb.WriteString("\n")
 		}
@@ -939,32 +933,8 @@ func generateAssembly(file *SourceFile, funcMap map[string]*FuncDecl) (string, e
 				sb.WriteString(fmt.Sprintf(".export %s\n", name))
 			}
 			sb.WriteString(fmt.Sprintf("%s:\n", name))
-			if strLit, ok := c.Value.(*StringLit); ok {
-				sb.WriteString(fmt.Sprintf("  .asciiz %q\n", strLit.Value))
-			} else if arrLit, ok := c.Value.(*ArrayLit); ok {
-				var items []string
-				for _, elem := range arrLit.Elements {
-					if n, ok := elem.(*NumberLit); ok {
-						items = append(items, fmt.Sprintf("$%02X", n.Value&0xFF))
-					} else {
-						items = append(items, "0")
-					}
-				}
-				if len(items) > 0 {
-					sb.WriteString(fmt.Sprintf("  .byte %s\n", strings.Join(items, ", ")))
-				}
-			} else if numLit, ok := c.Value.(*NumberLit); ok {
-				sb.WriteString(fmt.Sprintf("  .word $%04X\n", numLit.Value))
-			} else if incbin, ok := c.Value.(*IncbinExpr); ok {
-				sb.WriteString(fmt.Sprintf("  .incbin %q\n", incbin.Path))
-			} else if incchr, ok := c.Value.(*IncchrExpr); ok {
-				sb.WriteString(fmt.Sprintf("  .incchr %q\n", incchr.Path))
-			} else if incpal, ok := c.Value.(*IncpalExpr); ok {
-				if incpal.Count != nil {
-					sb.WriteString(fmt.Sprintf("  .incpal %q, %s\n", incpal.Path, formatConstExpr(incpal.Count, pkg)))
-				} else {
-					sb.WriteString(fmt.Sprintf("  .incpal %q\n", incpal.Path))
-				}
+			if err := emitConstDataDeclValue(&sb, c.Value, c.Type, structMap, pkg); err != nil {
+				return "", err
 			}
 			sb.WriteString("\n")
 		}
@@ -2023,6 +1993,10 @@ func exprSize(expr Expr, elemSize int) int {
 }
 
 func typeSize(t TypeSpec) int {
+	return typeSizeWithStructs(t, nil)
+}
+
+func typeSizeWithStructs(t TypeSpec, structMap map[string]*StructType) int {
 	if t == nil {
 		return 1
 	}
@@ -2038,10 +2012,19 @@ func typeSize(t TypeSpec) int {
 		case "uint32", "int32":
 			return 4
 		default:
+			if structMap != nil {
+				if st, ok := structMap[typ.Name]; ok {
+					sz := 0
+					for _, f := range st.Fields {
+						sz += typeSizeWithStructs(f.Type, structMap)
+					}
+					return sz
+				}
+			}
 			return 1
 		}
 	case *ArrayType:
-		elemSize := typeSize(typ.Elem)
+		elemSize := typeSizeWithStructs(typ.Elem, structMap)
 		if typ.Length != nil {
 			if num, ok := typ.Length.(*NumberLit); ok && num.Value > 0 {
 				return elemSize * int(num.Value)
@@ -2051,6 +2034,281 @@ func typeSize(t TypeSpec) int {
 	default:
 		return 1
 	}
+}
+
+func emitConstDataDeclValue(sb *strings.Builder, val Expr, targetType TypeSpec, structMap map[string]*StructType, pkg string) error {
+	if val == nil {
+		sz := typeSizeWithStructs(targetType, structMap)
+		emitZeroBytes(sb, sz)
+		return nil
+	}
+
+	// Direct inclusion directives
+	if strLit, ok := val.(*StringLit); ok && (targetType == nil || isStringType(targetType)) {
+		sb.WriteString(fmt.Sprintf("  .asciiz %q\n", strLit.Value))
+		return nil
+	}
+	if incbin, ok := val.(*IncbinExpr); ok {
+		sb.WriteString(fmt.Sprintf("  .incbin %q\n", incbin.Path))
+		return nil
+	}
+	if incchr, ok := val.(*IncchrExpr); ok {
+		sb.WriteString(fmt.Sprintf("  .incchr %q\n", incchr.Path))
+		return nil
+	}
+	if incpal, ok := val.(*IncpalExpr); ok {
+		if incpal.Count != nil {
+			sb.WriteString(fmt.Sprintf("  .incpal %q, %s\n", incpal.Path, formatConstExpr(incpal.Count, pkg)))
+		} else {
+			sb.WriteString(fmt.Sprintf("  .incpal %q\n", incpal.Path))
+		}
+		return nil
+	}
+
+	// Struct literal or struct type
+	var structName string
+	if targetType != nil {
+		if nt, ok := targetType.(*NamedType); ok {
+			if _, ok := structMap[nt.Name]; ok {
+				structName = nt.Name
+			}
+		}
+	}
+	if structLit, ok := val.(*StructLit); ok {
+		if structName == "" && structLit.Type != nil {
+			if nt, ok := structLit.Type.(*NamedType); ok {
+				structName = nt.Name
+			}
+		}
+		if structName == "" {
+			return fmt.Errorf("%s: cannot determine struct type for struct literal", structLit.Pos())
+		}
+		st, ok := structMap[structName]
+		if !ok {
+			return fmt.Errorf("%s: undefined struct type %q", structLit.Pos(), structName)
+		}
+		return emitStructLiteral(sb, structLit, st, structMap, pkg)
+	}
+
+	// Array literal or Array type
+	if arrType, ok := targetType.(*ArrayType); ok {
+		return emitArrayValue(sb, val, arrType, structMap, pkg)
+	}
+	if arrLit, ok := val.(*ArrayLit); ok {
+		var elemType TypeSpec = arrLit.ElemType
+		return emitArrayValue(sb, arrLit, &ArrayType{Elem: elemType, Length: arrLit.Length, pos: arrLit.Pos()}, structMap, pkg)
+	}
+
+	// Scalar values
+	if numLit, ok := val.(*NumberLit); ok {
+		sz := typeSizeWithStructs(targetType, structMap)
+		if sz == 2 {
+			sb.WriteString(fmt.Sprintf("  .word $%04X\n", numLit.Value&0xFFFF))
+		} else if sz == 4 {
+			sb.WriteString(fmt.Sprintf("  .dword $%08X\n", numLit.Value&0xFFFFFFFF))
+		} else {
+			sb.WriteString(fmt.Sprintf("  .byte $%02X\n", numLit.Value&0xFF))
+		}
+		return nil
+	}
+
+	if boolLit, ok := val.(*BoolLit); ok {
+		if boolLit.Value {
+			sb.WriteString("  .byte $01\n")
+		} else {
+			sb.WriteString("  .byte $00\n")
+		}
+		return nil
+	}
+
+	if charLit, ok := val.(*CharLit); ok {
+		sb.WriteString(fmt.Sprintf("  .byte $%02X\n", uint8(charLit.Value)))
+		return nil
+	}
+
+	// Fallback to formatted constant expression
+	sz := typeSizeWithStructs(targetType, structMap)
+	if sz == 2 {
+		sb.WriteString(fmt.Sprintf("  .word %s\n", formatConstExpr(val, pkg)))
+	} else {
+		sb.WriteString(fmt.Sprintf("  .byte %s\n", formatConstExpr(val, pkg)))
+	}
+	return nil
+}
+
+func emitStructLiteral(sb *strings.Builder, lit *StructLit, st *StructType, structMap map[string]*StructType, pkg string) error {
+	provided := make(map[string]*StructLitField)
+	for _, f := range lit.Fields {
+		if _, exists := provided[f.Name]; exists {
+			return fmt.Errorf("%s: duplicate field %q in struct literal", f.Pos(), f.Name)
+		}
+		provided[f.Name] = f
+	}
+
+	// Check for unknown fields
+	validFields := make(map[string]bool)
+	for _, sf := range st.Fields {
+		validFields[sf.Name] = true
+	}
+	for _, f := range lit.Fields {
+		if !validFields[f.Name] {
+			return fmt.Errorf("%s: unknown field %q in struct literal", f.Pos(), f.Name)
+		}
+	}
+
+	// Emit fields in struct definition order
+	for _, sf := range st.Fields {
+		if f, ok := provided[sf.Name]; ok {
+			if err := emitConstDataDeclValue(sb, f.Value, sf.Type, structMap, pkg); err != nil {
+				return err
+			}
+		} else {
+			// Zero-initialize omitted field
+			sz := typeSizeWithStructs(sf.Type, structMap)
+			emitZeroBytes(sb, sz)
+		}
+	}
+	return nil
+}
+
+func emitArrayValue(sb *strings.Builder, val Expr, arrType *ArrayType, structMap map[string]*StructType, pkg string) error {
+	elemType := arrType.Elem
+	expectedLen := -1
+	if arrType.Length != nil {
+		if num, ok := arrType.Length.(*NumberLit); ok && num.Value >= 0 {
+			expectedLen = int(num.Value)
+		}
+	}
+
+	if strLit, ok := val.(*StringLit); ok {
+		bytes := []byte(strLit.Value)
+		var items []string
+		for _, b := range bytes {
+			items = append(items, fmt.Sprintf("$%02X", b))
+		}
+		if len(items) > 0 {
+			sb.WriteString(fmt.Sprintf("  .byte %s\n", strings.Join(items, ", ")))
+		}
+		if expectedLen > len(bytes) {
+			emitZeroBytes(sb, expectedLen-len(bytes))
+		}
+		return nil
+	}
+
+	if arrLit, ok := val.(*ArrayLit); ok {
+		if expectedLen >= 0 && len(arrLit.Elements) > expectedLen {
+			return fmt.Errorf("%s: too many elements in array literal (expected %d, got %d)", arrLit.Pos(), expectedLen, len(arrLit.Elements))
+		}
+
+		// If elements are primitive scalar bytes, compact into single .byte lines
+		isSimpleBytes := false
+		if elemType != nil {
+			if nt, ok := elemType.(*NamedType); ok {
+				if nt.Name == "uint8" || nt.Name == "int8" || nt.Name == "bool" || nt.Name == "byte" {
+					isSimpleBytes = true
+				}
+			}
+		} else {
+			isSimpleBytes = true
+		}
+
+		if isSimpleBytes {
+			allSimple := true
+			for _, elem := range arrLit.Elements {
+				switch elem.(type) {
+				case *NumberLit, *BoolLit, *CharLit:
+				default:
+					allSimple = false
+				}
+			}
+			if allSimple && len(arrLit.Elements) > 0 {
+				var items []string
+				for _, elem := range arrLit.Elements {
+					switch e := elem.(type) {
+					case *NumberLit:
+						items = append(items, fmt.Sprintf("$%02X", e.Value&0xFF))
+					case *BoolLit:
+						if e.Value {
+							items = append(items, "$01")
+						} else {
+							items = append(items, "$00")
+						}
+					case *CharLit:
+						items = append(items, fmt.Sprintf("$%02X", uint8(e.Value)))
+					}
+				}
+				sb.WriteString(fmt.Sprintf("  .byte %s\n", strings.Join(items, ", ")))
+
+				if expectedLen > len(arrLit.Elements) {
+					elemSz := typeSizeWithStructs(elemType, structMap)
+					emitZeroBytes(sb, (expectedLen-len(arrLit.Elements))*elemSz)
+				}
+				return nil
+			}
+		}
+
+		// Otherwise, emit each element recursively
+		for _, elem := range arrLit.Elements {
+			if err := emitConstDataDeclValue(sb, elem, elemType, structMap, pkg); err != nil {
+				return err
+			}
+		}
+
+		if expectedLen > len(arrLit.Elements) {
+			elemSz := typeSizeWithStructs(elemType, structMap)
+			emitZeroBytes(sb, (expectedLen-len(arrLit.Elements))*elemSz)
+		}
+		return nil
+	}
+
+	if incbin, ok := val.(*IncbinExpr); ok {
+		sb.WriteString(fmt.Sprintf("  .incbin %q\n", incbin.Path))
+		return nil
+	}
+	if incchr, ok := val.(*IncchrExpr); ok {
+		sb.WriteString(fmt.Sprintf("  .incchr %q\n", incchr.Path))
+		return nil
+	}
+	if incpal, ok := val.(*IncpalExpr); ok {
+		if incpal.Count != nil {
+			sb.WriteString(fmt.Sprintf("  .incpal %q, %s\n", incpal.Path, formatConstExpr(incpal.Count, pkg)))
+		} else {
+			sb.WriteString(fmt.Sprintf("  .incpal %q\n", incpal.Path))
+		}
+		return nil
+	}
+
+	return emitConstDataDeclValue(sb, val, elemType, structMap, pkg)
+}
+
+func emitZeroBytes(sb *strings.Builder, count int) {
+	if count <= 0 {
+		return
+	}
+	if count <= 4 {
+		var items []string
+		for i := 0; i < count; i++ {
+			items = append(items, "$00")
+		}
+		sb.WriteString(fmt.Sprintf("  .byte %s\n", strings.Join(items, ", ")))
+	} else {
+		sb.WriteString(fmt.Sprintf("  .res %d, $00\n", count))
+	}
+}
+
+func isStringType(t TypeSpec) bool {
+	if t == nil {
+		return false
+	}
+	if nt, ok := t.(*NamedType); ok && nt.Name == "string" {
+		return true
+	}
+	if arr, ok := t.(*ArrayType); ok {
+		if nt, ok := arr.Elem.(*NamedType); ok && (nt.Name == "string" || nt.Name == "uint8" || nt.Name == "byte") {
+			return true
+		}
+	}
+	return false
 }
 
 func mangleSymbol(pkg, name string) string {

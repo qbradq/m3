@@ -1426,6 +1426,10 @@ func (p *Parser) parsePrefixExpression() (Expr, error) {
 		// Array literal: [length]type{ ... }
 		return p.parseArrayLiteral()
 
+	case TokenLBrace:
+		// Structure literal: { member: value, ... } or untyped array literal: { elem1, elem2, ... }
+		return p.parseBraceLiteral(nil)
+
 	default:
 		p.errorf("unexpected token in expression: %s (%q)", p.curToken.Type, p.curToken.Literal)
 		return nil, p.errorResult()
@@ -1539,6 +1543,99 @@ func (p *Parser) parseArrayLiteral() (*ArrayLit, error) {
 	return &ArrayLit{
 		Length:   lengthExpr,
 		ElemType: elemType,
+		Elements: elements,
+		pos:      pos,
+	}, nil
+}
+
+func (p *Parser) parseBraceLiteral(typeSpec TypeSpec) (Expr, error) {
+	pos := p.curToken.Pos
+	if !p.expect(TokenLBrace) {
+		return nil, p.errorResult()
+	}
+
+	p.skipSemicolons()
+
+	// Empty brace literal {}
+	if p.curTokenIs(TokenRBrace) {
+		p.nextToken()
+		return &StructLit{
+			Type:   typeSpec,
+			Fields: nil,
+			pos:    pos,
+		}, nil
+	}
+
+	// Check if this is a struct literal ({ field: expr, ... }) or array literal ({ expr, ... })
+	if p.curTokenIs(TokenIdent) && p.peekTokenIs(TokenColon) {
+		var fields []*StructLitField
+		for !p.curTokenIs(TokenRBrace) && !p.curTokenIs(TokenEOF) {
+			fieldPos := p.curToken.Pos
+			if !p.curTokenIs(TokenIdent) {
+				p.errorf("expected struct field identifier, got %s (%q)", p.curToken.Type, p.curToken.Literal)
+				return nil, p.errorResult()
+			}
+			fieldName := p.curToken.Literal
+			p.nextToken()
+
+			if !p.expect(TokenColon) {
+				return nil, p.errorResult()
+			}
+
+			fieldVal, err := p.parseExpression(0)
+			if err != nil {
+				return nil, err
+			}
+
+			fields = append(fields, &StructLitField{
+				Name:  fieldName,
+				Value: fieldVal,
+				pos:   fieldPos,
+			})
+
+			p.skipSemicolons()
+			if p.curTokenIs(TokenComma) {
+				p.nextToken()
+				p.skipSemicolons()
+			} else {
+				break
+			}
+		}
+
+		if !p.expect(TokenRBrace) {
+			return nil, p.errorResult()
+		}
+
+		return &StructLit{
+			Type:   typeSpec,
+			Fields: fields,
+			pos:    pos,
+		}, nil
+	}
+
+	// Otherwise, it's an array literal without explicit [length]type: { elem1, elem2, ... }
+	var elements []Expr
+	for !p.curTokenIs(TokenRBrace) && !p.curTokenIs(TokenEOF) {
+		elem, err := p.parseExpression(0)
+		if err != nil {
+			return nil, err
+		}
+		elements = append(elements, elem)
+		p.skipSemicolons()
+		if p.curTokenIs(TokenComma) {
+			p.nextToken()
+			p.skipSemicolons()
+		} else {
+			break
+		}
+	}
+
+	if !p.expect(TokenRBrace) {
+		return nil, p.errorResult()
+	}
+
+	return &ArrayLit{
+		ElemType: typeSpec,
 		Elements: elements,
 		pos:      pos,
 	}, nil

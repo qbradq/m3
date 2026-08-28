@@ -1,12 +1,9 @@
 package data
 
-bank auto
-
 data (
-    FontChr   uint8[]   = incchr("gfx/font.png")
-    FontPal   uint8[]   = incpal("gfx/font.pal")
-    TilesSurfaceChr uint8[] = incchr("gfx/tiles_surface.png")
-    TilesSurfacePal uint8[] = incpal("gfx/tiles_surface.pal")
-    SpritePal uint8[]   = incpal("gfx/sprites.pal")
-    SpriteChr uint8[]   = incchr("gfx/sprites.png")
+    FontChr         uint8[] bank 0  = incchr("gfx/font.png")
+    TilesSurfaceChr uint8[] bank 0  = incchr("gfx/tiles_surface.png")
+    SpriteChr       uint8[] bank 1  = incchr("gfx/sprites.png")
+    TilesSurfacePal uint8[] bank 61 = incpal("gfx/tiles_surface.pal")
+    SpritePal       uint8[] bank 61 = incpal("gfx/sprites.pal")
 )

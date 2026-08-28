@@ -1,10 +1,12 @@
 package tileset
 
 type Tile struct {
-    chr uint8[4]
-    palette uint8
-    walkable bool
-    sailable bool
+    Chr uint8[4]
+    Palette uint8
+    Walkable bool
+    Sailable bool
 }
 
-var TileSet Tile[64] wram
+type TileSet struct {
+    
+}

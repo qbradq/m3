@@ -269,6 +269,14 @@ const palette_data uint8[16] bank 0 = [4]uint8{$0F, $00, $10, $30} // Padded to 
 
 // String data in Fixed Bank 63 (relocated to $E000)
 const title_string string[] bank 63 = "SUPER NES GAME\0"
+
+// Struct constant with named fields
+const default_actor Actor = {
+    x: 10,
+    y: 20,
+    health: 100,
+    flags: 1,
+}
 ```
 
 ---
@@ -292,9 +300,9 @@ data (
 )
 ```
 
-- **`type[n]`**: Specifies the element type and optional array length (e.g. `uint8[16]`, `uint8[]`, `string[]`).
+- **`type[n]`**: Specifies the element type and optional array length (e.g. `uint8[16]`, `uint8[]`, `string[]`, `Tile[64]`).
 - **`bank` (optional)**: Specifies explicit PRG-ROM bank (`0`–`63`) or `bank auto` (default).
-- **`data_expr`**: An array literal (e.g. `[16]uint8{...}`), string literal, or data inclusion expression (`incbin(...)`, `incchr(...)`, `incpal(...)`).
+- **`data_expr`**: An array literal (e.g. `[16]uint8{...}`), struct literal (e.g. `{ member: value, ... }`), string literal, or data inclusion expression (`incbin(...)`, `incchr(...)`, `incpal(...)`).
 - **Address Relocation**: All `data` symbols relocate to the `$8000-$9FFF` range.
 
 #### Examples
@@ -308,6 +316,14 @@ data (
     TitlePal  uint8[16] bank 1 = incpal("title.png")
     WorldMap  uint8[]   bank 2 = incbin("world.bin")
     FontChr   uint8[]          = incchr("font.png")
+
+    // Banked struct literal asset
+    WaterTile Tile bank 1 = {
+        chr: [4]uint8{128, 128, 128, 128},
+        palette: 1,
+        walkable: false,
+        sailable: true,
+    }
 )
 ```
 
@@ -336,7 +352,7 @@ type Actor struct {
 
 ### 6.2 Striped Array Allocation
 
-When an array of structs is declared, the compiler stripes the fields into parallel arrays:
+When an array of structs is declared in RAM (`zp`, `ram`, `wram`), the compiler stripes the fields into parallel arrays:
 
 ```go
 var actors Actor[16] ram
@@ -372,6 +388,46 @@ CLC
 ADC actors_vx, X
 STA actors_x, X
 ```
+
+### 6.4 Structure Literals (`const` & `data`)
+
+Structure literals initialize struct constants or ROM data tables:
+
+```go
+type Tile struct {
+    chr      uint8[4]
+    palette  uint8
+    walkable bool
+    sailable bool
+}
+
+// Single struct constant in .code PRG-ROM
+const DeepWater Tile = {
+    chr: [4]uint8{128, 128, 128, 128},
+    palette: 1,
+    walkable: false,
+    sailable: true,
+}
+
+// Array of struct literals in banked .data PRG-ROM
+data SurfaceTiles Tile[2] bank 1 = [2]Tile{
+    {
+        chr: {128, 128, 128, 128},
+        palette: 1,
+        walkable: false,
+        sailable: true,
+    },
+    {
+        chr: {129, 129, 129, 129},
+        palette: 1,
+        walkable: false,
+        sailable: true,
+    },
+}
+```
+
+- **Field Mapping**: Fields are specified by name (`member: value`) with optional trailing commas. In ROM, bytes are emitted in the exact layout order defined by the `struct` type.
+- **Default Zero Initialization**: Any fields omitted from the structure literal are automatically initialized to zero (`0`).
 
 ---
 
