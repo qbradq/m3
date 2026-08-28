@@ -227,4 +227,56 @@ func Copy(src, dst *uint8[], len uint16) {
     }
 }
 `,
+
+  'ppu_driver.m3': `package ppu_driver
+
+// Hardware Registers & Command Constants
+define (
+    PPU_CTRL   $2000
+    PPU_MASK   $2001
+    PPU_STATUS $2002
+    PPU_SCROLL $2005
+    PPU_ADDR   $2006
+    PPU_DATA   $2007
+
+    CMD_END   $00
+    CMD_HORIZ $01
+    CMD_VERT  $02
+    CMD_BYTE  $03
+)
+
+// Display list RAM buffer and zero-page scratchpad variables
+var (
+    list_buf uint8[128] ram
+    list_len uint8      zp
+    push_src *uint8     zp
+    push_dst uint16     zp
+    push_len uint8      zp
+    push_val uint8      zp
+)
+
+// Clear resets the display list write pointer to 0 and clears the buffer head.
+func Clear() {
+}
+
+// PushHorizontal buffers a command to copy len bytes from src to PPU RAM
+// starting at dest with horizontal (+1) auto-increment during the next VBlank.
+func PushHorizontal(src *uint8[], dest uint16, len uint8) {
+}
+
+// PushVertical buffers a command to copy len bytes from src to PPU RAM
+// starting at dest with vertical (+32) auto-increment during the next VBlank.
+func PushVertical(src *uint8[], dest uint16, len uint8) {
+}
+
+// PushByte buffers a single byte patch to PPU RAM at dest during the next VBlank.
+func PushByte(val uint8, dest uint16) {
+}
+
+// Process iterates over all buffered display list commands, executes the PPU
+// transfers, and clears the display list. Must be called during VBlank from the
+// NMI handler with PPU enabled.
+func Process() {
+}
+`,
 };

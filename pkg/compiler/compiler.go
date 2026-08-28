@@ -1306,6 +1306,35 @@ func (cg *codeGenerator) compileCallExpr(sb *strings.Builder, call *CallExpr) {
 		return
 	}
 
+	// 4. ppu_driver.PushHorizontal(src, dest, len)
+	if funcPkg == "ppu_driver" && funcName == "PushHorizontal" && len(call.Args) == 3 {
+		cg.emitPointerLoad(sb, call.Args[0], "_ppu_driver_push_src")
+		cg.emitWordLoad(sb, call.Args[1], "_ppu_driver_push_dst")
+		cg.evalExprIntoA(sb, call.Args[2])
+		sb.WriteString("  STA _ppu_driver_push_len\n")
+		sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
+		return
+	}
+
+	// 5. ppu_driver.PushVertical(src, dest, len)
+	if funcPkg == "ppu_driver" && funcName == "PushVertical" && len(call.Args) == 3 {
+		cg.emitPointerLoad(sb, call.Args[0], "_ppu_driver_push_src")
+		cg.emitWordLoad(sb, call.Args[1], "_ppu_driver_push_dst")
+		cg.evalExprIntoA(sb, call.Args[2])
+		sb.WriteString("  STA _ppu_driver_push_len\n")
+		sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
+		return
+	}
+
+	// 6. ppu_driver.PushByte(val, dest)
+	if funcPkg == "ppu_driver" && funcName == "PushByte" && len(call.Args) == 2 {
+		cg.evalExprIntoA(sb, call.Args[0])
+		sb.WriteString("  STA _ppu_driver_push_val\n")
+		cg.emitWordLoad(sb, call.Args[1], "_ppu_driver_push_dst")
+		sb.WriteString(fmt.Sprintf("  JSR %s\n", mangledFunc))
+		return
+	}
+
 	// General Fastcall ABI:
 	// Arg 0 -> A
 	// Arg 1 -> X

@@ -77,24 +77,26 @@ import (
     "oam.m3"
     "ppu.m3"
     "memory.m3"
+    "ppu_driver.m3"
 )
 
 func main() {
     ppu.Disable()
     oam.Clear()
     memory.Copy(src, dst, 16)
+    ppu_driver.Clear()
 }
 `;
 
   const doc = TextDocument.create('file:///test_imports.m3', 'm3', 1, m3Source);
   const parsed = parseM3Document(m3Source, 'file:///test_imports.m3');
 
-  // Verify packages were loaded
-  assert.ok(parsed.importedPackages.has('ppu'), 'ppu package should be imported');
-  assert.ok(parsed.importedPackages.has('oam'), 'oam package should be imported');
-  assert.ok(parsed.importedPackages.has('memory'), 'memory package should be imported');
+  // Verify imports are populated in symbols
+  assert.ok(parsed.importedPackages.has('ppu'), 'Should have ppu package');
+  assert.ok(parsed.importedPackages.has('oam'), 'Should have oam package');
+  assert.ok(parsed.importedPackages.has('memory'), 'Should have memory package');
+  assert.ok(parsed.importedPackages.has('ppu_driver'), 'Should have ppu_driver package');
 
-  // Check ppu symbols
   const ppuPkg = parsed.importedPackages.get('ppu')!;
   assert.ok(ppuPkg.symbols.has('Disable'), 'ppu should contain Disable func');
   assert.ok(ppuPkg.symbols.has('Enable'), 'ppu should contain Enable func');
@@ -107,25 +109,36 @@ func main() {
   assert.ok(ppuLabels.includes('Enable'), 'ppu. completion should include Enable');
   assert.ok(ppuLabels.includes('DirectUploadPalette'), 'ppu. completion should include DirectUploadPalette');
 
+  // Test package member completion when typing "ppu_driver."
+  const driverDoc = TextDocument.create('file:///test_imports.m3', 'm3', 3, '    ppu_driver.');
+  const driverCompletions = getM3Completions(driverDoc, { line: 0, character: 15 }, parsed);
+  const driverLabels = driverCompletions.map((c) => c.label);
+  assert.ok(driverLabels.includes('Clear'), 'ppu_driver. completion should include Clear');
+  assert.ok(driverLabels.includes('PushHorizontal'), 'ppu_driver. completion should include PushHorizontal');
+  assert.ok(driverLabels.includes('PushVertical'), 'ppu_driver. completion should include PushVertical');
+  assert.ok(driverLabels.includes('PushByte'), 'ppu_driver. completion should include PushByte');
+  assert.ok(driverLabels.includes('Process'), 'ppu_driver. completion should include Process');
+
   // Test package member completion when typing "oam."
-  const oamDoc = TextDocument.create('file:///test_imports.m3', 'm3', 3, '    oam.');
+  const oamDoc = TextDocument.create('file:///test_imports.m3', 'm3', 4, '    oam.');
   const oamCompletions = getM3Completions(oamDoc, { line: 0, character: 8 }, parsed);
   const oamLabels = oamCompletions.map((c) => c.label);
   assert.ok(oamLabels.includes('Clear'), 'oam. completion should include Clear');
   assert.ok(oamLabels.includes('PutSprite'), 'oam. completion should include PutSprite');
 
   // Test package member completion when typing "memory."
-  const memDoc = TextDocument.create('file:///test_imports.m3', 'm3', 4, '    memory.');
+  const memDoc = TextDocument.create('file:///test_imports.m3', 'm3', 5, '    memory.');
   const memCompletions = getM3Completions(memDoc, { line: 0, character: 11 }, parsed);
   const memLabels = memCompletions.map((c) => c.label);
   assert.ok(memLabels.includes('Copy'), 'memory. completion should include Copy');
 
-  // Test general completions includes "ppu", "ppu.Disable", "memory.Copy"
+  // Test general completions includes "ppu", "ppu.Disable", "memory.Copy", "ppu_driver.Process"
   const generalCompletions = getM3Completions(doc, { line: 8, character: 0 }, parsed);
   const generalLabels = generalCompletions.map((c) => c.label);
   assert.ok(generalLabels.includes('ppu'), 'General completions should include ppu module');
   assert.ok(generalLabels.includes('ppu.Disable'), 'General completions should include qualified ppu.Disable');
   assert.ok(generalLabels.includes('memory.Copy'), 'General completions should include qualified memory.Copy');
+  assert.ok(generalLabels.includes('ppu_driver.Process'), 'General completions should include qualified ppu_driver.Process');
 
   // Test hover on "ppu.Disable"
   const hoverDoc = TextDocument.create('file:///test_imports.m3', 'm3', 5, '    ppu.Disable()');

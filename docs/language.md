@@ -654,3 +654,37 @@ func main() bank 0 {
     }
 }
 ```
+
+---
+
+## 12. Standard Libraries
+
+The `m3` toolchain includes embedded standard libraries in `pkg/data/lib/` available to any file via library imports:
+
+### 12.1 `ppu_driver.m3` - VBlank Display List Driver
+Buffered PPU VRAM patching driver for executing transfers during VBlank while rendering is active.
+- `ppu_driver.Clear()`: Resets the display list buffer.
+- `ppu_driver.PushHorizontal(src *uint8[], dest uint16, len uint8)`: Buffers a copy of `len` bytes from `src` to PPU VRAM starting at `dest` using horizontal (+1) increment.
+- `ppu_driver.PushVertical(src *uint8[], dest uint16, len uint8)`: Buffers a copy of `len` bytes from `src` to PPU VRAM starting at `dest` using vertical (+32) increment.
+- `ppu_driver.PushByte(val uint8, dest uint16)`: Buffers a single byte patch to PPU VRAM address `dest`.
+- `ppu_driver.Process()`: Flushes all queued commands into PPU RAM and resets scroll. Must be called from the user's NMI handler during VBlank.
+
+### 12.2 `ppu.m3` - PPU Control & Palette Management
+PPU control routines for use during startup or when rendering is turned off.
+- `ppu.Disable()`: Waits for end of next NMI and turns screen rendering off.
+- `ppu.Enable()`: Enables screen rendering and NMI generation.
+- `ppu.DirectUploadPalette(pal *uint8[32])`: Directly uploads 32 palette bytes to PPU palette memory ($3F00).
+- `ppu.DirectUpload(src *uint8[], ppu_dst, len uint16)`: Streams `len` bytes directly to VRAM starting at `ppu_dst` (screen must be disabled).
+
+### 12.3 `oam.m3` - Sprite & Anti-Flicker Manager
+- `oam.Clear()`: Hides all 64 sprites in the OAM buffer ($0200) and resets the write pointer to the anti-flicker starting offset.
+- `oam.AdvanceFlicker()`: Rotates sprite priorities by advancing the hardware starting offset to prevent scanline dropout.
+- `oam.PutSprite(x, y, tile, attr uint8)`: Appends an 8x8 sprite to the OAM buffer.
+
+### 12.4 `memory.m3` - Memory Operations
+- `memory.Copy(src, dst *uint8[], len uint16)`: Fast memory block copy in CPU address space.
+
+### 12.5 `mmc.m3` - MMC3 Memory & Bank Control
+- `mmc.PushDataBank(n uint8)`: Pushes bank `n` onto the data bank stack and maps it to $8000-$9FFF (Register 6).
+- `mmc.PopDataBank()`: Pops and restores the previous data bank.
+

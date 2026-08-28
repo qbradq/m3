@@ -954,3 +954,39 @@ func main() bank 0 {
 	}
 }
 
+func TestBuildPPUDriverLibrary(t *testing.T) {
+	tmpDir := t.TempDir()
+	mainPath := filepath.Join(tmpDir, "main.m3")
+	mainSrc := `
+package main
+
+import "ppu_driver.m3"
+
+var msg uint8[16] ram
+
+func nmi() bank 63 {
+    ppu_driver.Process()
+}
+
+func main() bank 0 {
+    ppu_driver.Clear()
+    ppu_driver.PushHorizontal(msg, $2000, 16)
+    ppu_driver.PushVertical(msg, $2020, 8)
+    ppu_driver.PushByte($42, $23C0)
+}
+`
+	if err := os.WriteFile(mainPath, []byte(mainSrc), 0644); err != nil {
+		t.Fatalf("failed to write main.m3: %v", err)
+	}
+
+	rom, err := Build([]string{mainPath})
+	if err != nil {
+		t.Fatalf("Build with ppu_driver.m3 failed: %v", err)
+	}
+
+	if len(rom) != 16+64*8192 {
+		t.Fatalf("expected ROM size %d, got %d", 16+64*8192, len(rom))
+	}
+}
+
+

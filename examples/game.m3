@@ -1,10 +1,13 @@
 package main
 
+bank 63
+
 import (
     "memory.m3"
     "mmc.m3"
     "oam.m3"
     "ppu.m3"
+    "ppu_driver.m3"
 
     "./data/data.m3"
 )
@@ -36,6 +39,9 @@ var (
 
 // PRG-ROM Data Table (Auto placed by Linker)
 const enemy_spawn_x uint8[8] = [8]uint8{16, 48, 80, 112, 144, 176, 208, 240}
+
+// Hello world message
+const hello_world string = "Hello, World!"
 
 // Initialize Enemies
 func init_enemies() {
@@ -85,6 +91,10 @@ func main() {
     mmc.PopDataBank()
     ppu.Enable()
 
+    // Setup the "Hello, World" message
+    ppu_driver.Clear()
+    ppu_driver.PushHorizontal(hello_world, $2168, 13)
+
     for {
         // Wait for VBlank
         asm {
@@ -102,4 +112,8 @@ func main() {
             }
         }
     }
+}
+
+func nmi() {
+    ppu_driver.Process()
 }
