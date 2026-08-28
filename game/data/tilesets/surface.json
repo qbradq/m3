@@ -1,0 +1,150 @@
+{
+    "name": "Surface",
+    "image": "tiles_surface.png",
+    "tiles": [
+        {
+            "name": "Deep Water",
+            "chr": [
+                128,
+                128,
+                128,
+                128
+            ],
+            "palette": 1,
+            "walkable": false,
+            "sailable": true
+        },
+        {
+            "name": "Shallow Water",
+            "chr": [
+                129,
+                129,
+                129,
+                129
+            ],
+            "palette": 1,
+            "walkable": false,
+            "sailable": true
+        },
+        {
+            "name": "Grass",
+            "chr": [
+                130,
+                130,
+                130,
+                130
+            ],
+            "palette": 2,
+            "walkable": true,
+            "sailable": false
+        },
+        {
+            "name": "Dirt",
+            "chr": [
+                135,
+                135,
+                135,
+                135
+            ],
+            "palette": 2,
+            "walkable": true,
+            "sailable": false
+        },
+        {
+            "name": "Grass to Dirt NW",
+            "chr": [
+                131,
+                132,
+                134,
+                135
+            ],
+            "palette": 2,
+            "walkable": true,
+            "sailable": false
+        },
+        {
+            "name": "Grass to Dirt N",
+            "chr": [
+                132,
+                132,
+                135,
+                135
+            ],
+            "palette": 2,
+            "walkable": true,
+            "sailable": false
+        },
+        {
+            "name": "Grass to Dirt NE",
+            "chr": [
+                132,
+                133,
+                135,
+                136
+            ],
+            "palette": 2,
+            "walkable": true,
+            "sailable": false
+        },
+        {
+            "name": "Grass to Dirt W",
+            "chr": [
+                134,
+                135,
+                134,
+                135
+            ],
+            "palette": 2,
+            "walkable": true,
+            "sailable": false
+        },
+        {
+            "name": "Grass to Dirt E",
+            "chr": [
+                135,
+                136,
+                135,
+                136
+            ],
+            "palette": 2,
+            "walkable": true,
+            "sailable": false
+        },
+        {
+            "name": "Grass to Dirt SW",
+            "chr": [
+                134,
+                135,
+                137,
+                138
+            ],
+            "palette": 2,
+            "walkable": true,
+            "sailable": false
+        },
+        {
+            "name": "Grass to Dirt S",
+            "chr": [
+                135,
+                135,
+                138,
+                138
+            ],
+            "palette": 2,
+            "walkable": true,
+            "sailable": false
+        },
+        {
+            "name": "Grass to Dirt SE",
+            "chr": [
+                135,
+                136,
+                138,
+                139
+            ],
+            "palette": 2,
+            "walkable": true,
+            "sailable": false
+        }
+    ]
+}
