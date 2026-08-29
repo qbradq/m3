@@ -73,4 +73,25 @@ data SurfaceTileset Tile[] = {
 		Walkable: false,
 		Sailable: false,
 	},
+	{
+		Chr: {132, 132, 132, 132},
+		Palette: 2,
+		BlocksVis: false,
+		Walkable: true,
+		Sailable: false,
+	},
+	{
+		Chr: {133, 133, 133, 133},
+		Palette: 3,
+		BlocksVis: false,
+		Walkable: true,
+		Sailable: false,
+	},
+	{
+		Chr: {134, 134, 134, 134},
+		Palette: 0,
+		BlocksVis: false,
+		Walkable: true,
+		Sailable: false,
+	},
 }

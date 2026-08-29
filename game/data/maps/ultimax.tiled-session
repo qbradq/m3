@@ -11,6 +11,7 @@
     },
     "last.imagePath": "/home/qbradq/projects/m3/game/data/maps",
     "map.height": 64,
+    "map.lastUsedFormat": "tmx",
     "map.tileHeight": 16,
     "map.tileWidth": 16,
     "map.width": 64,

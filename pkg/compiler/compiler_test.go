@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/qbradq/m3/pkg/gfx"
 )
 
 func TestCompilerEndToEnd(t *testing.T) {
@@ -520,10 +522,10 @@ func TestBuildInclusionExpressions(t *testing.T) {
 	}
 
 	pal := color.Palette{
-		color.RGBA{0, 0, 0, 0},         // $0F
-		color.RGBA{84, 4, 0, 255},      // $06
-		color.RGBA{73, 170, 16, 255},   // $0A
-		color.RGBA{20, 18, 167, 255},   // $02
+		color.RGBA{0, 0, 0, 0},                                                                   // $0F
+		color.RGBA{gfx.NESPaletteRGB[0x06][0], gfx.NESPaletteRGB[0x06][1], gfx.NESPaletteRGB[0x06][2], 255}, // $06
+		color.RGBA{gfx.NESPaletteRGB[0x0A][0], gfx.NESPaletteRGB[0x0A][1], gfx.NESPaletteRGB[0x0A][2], 255}, // $0A
+		color.RGBA{gfx.NESPaletteRGB[0x02][0], gfx.NESPaletteRGB[0x02][1], gfx.NESPaletteRGB[0x02][2], 255}, // $02
 	}
 	img := image.NewPaletted(image.Rect(0, 0, 8, 8), pal)
 	for x := 0; x < 8; x++ {

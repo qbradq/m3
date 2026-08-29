@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/qbradq/m3/pkg/gfx"
 	"github.com/qbradq/m3/pkg/obj"
 )
 
@@ -218,10 +219,10 @@ func TestIncchrAndIncpal(t *testing.T) {
 	}
 
 	pal := color.Palette{
-		color.RGBA{0, 0, 0, 0},         // Transparent -> $0F
-		color.RGBA{84, 4, 0, 255},      // Reddish -> $06
-		color.RGBA{73, 170, 16, 255},   // Green -> $0A
-		color.RGBA{255, 255, 255, 255}, // White -> $30
+		color.RGBA{0, 0, 0, 0},                                                                   // Transparent -> $0F
+		color.RGBA{gfx.NESPaletteRGB[0x06][0], gfx.NESPaletteRGB[0x06][1], gfx.NESPaletteRGB[0x06][2], 255}, // Reddish -> $06
+		color.RGBA{gfx.NESPaletteRGB[0x0A][0], gfx.NESPaletteRGB[0x0A][1], gfx.NESPaletteRGB[0x0A][2], 255}, // Green -> $0A
+		color.RGBA{gfx.NESPaletteRGB[0x30][0], gfx.NESPaletteRGB[0x30][1], gfx.NESPaletteRGB[0x30][2], 255}, // White -> $30
 	}
 	img := image.NewPaletted(image.Rect(0, 0, 8, 8), pal)
 	for x := 0; x < 8; x++ {

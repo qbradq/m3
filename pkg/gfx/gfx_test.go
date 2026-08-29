@@ -61,10 +61,10 @@ func TestConvertPNGToCHR(t *testing.T) {
 
 func TestExtractPNGPalette(t *testing.T) {
 	palette := color.Palette{
-		color.RGBA{0, 0, 0, 0},         // Transparent -> $0F
-		color.RGBA{84, 4, 0, 255},      // Reddish -> $06
-		color.RGBA{0, 64, 0, 255},      // Green -> $0A
-		color.RGBA{255, 255, 255, 255}, // White -> $30
+		color.RGBA{0, 0, 0, 0}, // Transparent -> $0F
+		color.RGBA{NESPaletteRGB[0x06][0], NESPaletteRGB[0x06][1], NESPaletteRGB[0x06][2], 255}, // Reddish -> $06
+		color.RGBA{NESPaletteRGB[0x0A][0], NESPaletteRGB[0x0A][1], NESPaletteRGB[0x0A][2], 255}, // Green -> $0A
+		color.RGBA{NESPaletteRGB[0x30][0], NESPaletteRGB[0x30][1], NESPaletteRGB[0x30][2], 255}, // White -> $30
 	}
 	img := image.NewPaletted(image.Rect(0, 0, 8, 8), palette)
 

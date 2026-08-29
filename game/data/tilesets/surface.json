@@ -131,6 +131,45 @@
             "blocks_vis": true,
             "walkable": false,
             "sailable": false
+        },
+        {
+            "name": "Wood Floor",
+            "chr": [
+                132,
+                132,
+                132,
+                132
+            ],
+            "palette": 2,
+            "blocks_vis": false,
+            "walkable": true,
+            "sailable": false
+        },
+        {
+            "name": "Royal Carpet",
+            "chr": [
+                133,
+                133,
+                133,
+                133
+            ],
+            "palette": 3,
+            "blocks_vis": false,
+            "walkable": true,
+            "sailable": false
+        },
+        {
+            "name": "Stone Tiles",
+            "chr": [
+                134,
+                134,
+                134,
+                134
+            ],
+            "palette": 0,
+            "blocks_vis": false,
+            "walkable": true,
+            "sailable": false
         }
     ]
 }
