@@ -1,6 +1,7 @@
 {
     "name": "Surface",
     "image": "tiles_surface.png",
+    "slot": 0,
     "tiles": [
         {
             "name": "Deep Water",

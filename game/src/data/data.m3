@@ -1,5 +1,10 @@
 package data
 
+import (
+    "../tileset.m3"
+    "./tilesets/surface.m3"
+)
+
 data TilesChr uint8[][] bank 0 = {
     incchr("gfx/font.png"),
     incchr("gfx/tiles_surface.png"),
