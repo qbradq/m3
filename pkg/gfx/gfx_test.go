@@ -15,9 +15,9 @@ func TestMatchRGBToNES(t *testing.T) {
 		t.Errorf("black matched to %02X", black)
 	}
 
-	white := MatchRGBToNES(236, 238, 236)
-	if white != 0x20 && white != 0x30 {
-		t.Errorf("white matched to %02X", white)
+	white := MatchRGBToNES(255, 255, 255)
+	if white != 0x30 {
+		t.Errorf("white matched to %02X, want 0x30", white)
 	}
 }
 
@@ -64,7 +64,7 @@ func TestExtractPNGPalette(t *testing.T) {
 		color.RGBA{0, 0, 0, 0},         // Transparent -> $0F
 		color.RGBA{84, 4, 0, 255},      // Reddish -> $06
 		color.RGBA{0, 64, 0, 255},      // Green -> $0A
-		color.RGBA{236, 238, 236, 255}, // White -> $20 or $30
+		color.RGBA{255, 255, 255, 255}, // White -> $30
 	}
 	img := image.NewPaletted(image.Rect(0, 0, 8, 8), palette)
 
@@ -90,5 +90,8 @@ func TestExtractPNGPalette(t *testing.T) {
 	}
 	if pal[2] != 0x0A && pal[2] != 0x09 {
 		t.Errorf("pal[2] = 0x%02X, want 0x0A or 0x09", pal[2])
+	}
+	if pal[3] != 0x30 {
+		t.Errorf("pal[3] = 0x%02X, want 0x30", pal[3])
 	}
 }

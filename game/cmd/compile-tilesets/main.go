@@ -195,10 +195,11 @@ func generateM3Code(basename string, tileset *TilesetJSON, tileFields []*compile
 }
 
 func formatFieldValue(field *compiler.StructField, tileMap map[string]interface{}) string {
-	// Look up value case-insensitively
+	// Look up value case-insensitively and ignoring underscores (e.g. blocks_vis -> BlocksVis)
 	var rawVal interface{}
+	normField := strings.ToLower(strings.ReplaceAll(field.Name, "_", ""))
 	for k, v := range tileMap {
-		if strings.EqualFold(k, field.Name) {
+		if strings.ToLower(strings.ReplaceAll(k, "_", "")) == normField {
 			rawVal = v
 			break
 		}

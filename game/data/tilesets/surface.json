@@ -11,6 +11,7 @@
                 128
             ],
             "palette": 1,
+            "blocks_vis": false,
             "walkable": false,
             "sailable": true
         },
@@ -23,6 +24,7 @@
                 129
             ],
             "palette": 1,
+            "blocks_vis": false,
             "walkable": false,
             "sailable": true
         },
@@ -35,115 +37,99 @@
                 130
             ],
             "palette": 2,
+            "blocks_vis": false,
             "walkable": true,
             "sailable": false
         },
         {
             "name": "Dirt",
             "chr": [
-                135,
-                135,
-                135,
-                135
-            ],
-            "palette": 2,
-            "walkable": true,
-            "sailable": false
-        },
-        {
-            "name": "Grass to Dirt NW",
-            "chr": [
                 131,
-                132,
-                134,
-                135
+                131,
+                131,
+                131
             ],
             "palette": 2,
+            "blocks_vis": false,
             "walkable": true,
             "sailable": false
         },
         {
-            "name": "Grass to Dirt N",
+            "name": "Brush",
             "chr": [
-                132,
-                132,
-                135,
-                135
+                140,
+                141,
+                142,
+                143
             ],
             "palette": 2,
+            "blocks_vis": false,
             "walkable": true,
             "sailable": false
         },
         {
-            "name": "Grass to Dirt NE",
+            "name": "Tree",
             "chr": [
-                132,
-                133,
-                135,
-                136
+                144,
+                145,
+                146,
+                147
             ],
             "palette": 2,
+            "blocks_vis": true,
             "walkable": true,
             "sailable": false
         },
         {
-            "name": "Grass to Dirt W",
+            "name": "Brick Wall",
             "chr": [
-                134,
-                135,
-                134,
-                135
+                148,
+                148,
+                148,
+                148
             ],
-            "palette": 2,
+            "palette": 0,
+            "blocks_vis": true,
+            "walkable": false,
+            "sailable": false
+        },
+        {
+            "name": "Blue Carpet",
+            "chr": [
+                149,
+                149,
+                149,
+                149
+            ],
+            "palette": 1,
+            "blocks_vis": false,
             "walkable": true,
             "sailable": false
         },
         {
-            "name": "Grass to Dirt E",
+            "name": "Counter",
             "chr": [
-                135,
-                136,
-                135,
-                136
+                150,
+                150,
+                151,
+                151
             ],
             "palette": 2,
-            "walkable": true,
+            "blocks_vis": false,
+            "walkable": false,
             "sailable": false
         },
         {
-            "name": "Grass to Dirt SW",
+            "name": "Closed Door",
             "chr": [
-                134,
-                135,
-                137,
-                138
+                152,
+                153,
+                154,
+                155
             ],
             "palette": 2,
-            "walkable": true,
-            "sailable": false
-        },
-        {
-            "name": "Grass to Dirt S",
-            "chr": [
-                135,
-                135,
-                138,
-                138
-            ],
-            "palette": 2,
-            "walkable": true,
-            "sailable": false
-        },
-        {
-            "name": "Grass to Dirt SE",
-            "chr": [
-                135,
-                136,
-                138,
-                139
-            ],
-            "palette": 2,
-            "walkable": true,
+            "blocks_vis": true,
+            "walkable": false,
             "sailable": false
         }
     ]

@@ -384,7 +384,7 @@ Includes a text `.pal` palette file and converts it into raw binary NES hardware
 - Defines up to 4 4-color palettes for the NES.
 - Lines matching `^[0-3]:$` indicate the start of a palette slot in strictly increasing numeric order.
 - Up to 4 lines follow specifying hex color values (e.g. `$0F`).
-- Color `$0D` is strictly forbidden.
+- Colors `$0D` and `$20` are strictly forbidden.
 
 ```assembly
 .bank 0

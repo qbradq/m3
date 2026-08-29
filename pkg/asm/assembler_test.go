@@ -212,7 +212,7 @@ func TestIncchrAndIncpal(t *testing.T) {
 	pngPath := filepath.Join(tmpDir, "tile.png")
 	palPath := filepath.Join(tmpDir, "tile.pal")
 
-	palText := "0:\n$0F\n$06\n$0A\n$20\n"
+	palText := "0:\n$0F\n$06\n$0A\n$30\n"
 	if err := os.WriteFile(palPath, []byte(palText), 0644); err != nil {
 		t.Fatalf("failed to write temp pal: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestIncchrAndIncpal(t *testing.T) {
 		color.RGBA{0, 0, 0, 0},         // Transparent -> $0F
 		color.RGBA{84, 4, 0, 255},      // Reddish -> $06
 		color.RGBA{73, 170, 16, 255},   // Green -> $0A
-		color.RGBA{255, 255, 255, 255}, // White -> $20
+		color.RGBA{255, 255, 255, 255}, // White -> $30
 	}
 	img := image.NewPaletted(image.Rect(0, 0, 8, 8), pal)
 	for x := 0; x < 8; x++ {
@@ -261,7 +261,7 @@ tiles:
 	}
 
 	// Verify palette header (first 4 bytes from tile.pal, followed by 12 zeros)
-	if bank0.Data[0] != 0x0F || bank0.Data[1] != 0x06 || bank0.Data[2] != 0x0A || bank0.Data[3] != 0x20 {
+	if bank0.Data[0] != 0x0F || bank0.Data[1] != 0x06 || bank0.Data[2] != 0x0A || bank0.Data[3] != 0x30 {
 		t.Errorf("unexpected palette bytes: %v", bank0.Data[:4])
 	}
 	for i := 4; i < 16; i++ {

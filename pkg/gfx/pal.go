@@ -85,6 +85,9 @@ func ParsePal(r io.Reader) (*PaletteFile, error) {
 		if colorByte == 0x0D {
 			return nil, fmt.Errorf("line %d: palette references forbidden color $0D", lineNum)
 		}
+		if colorByte == 0x20 {
+			return nil, fmt.Errorf("line %d: palette references forbidden color $20", lineNum)
+		}
 		if colorByte > 0x3F {
 			return nil, fmt.Errorf("line %d: color $%02X out of NES palette range ($00-$3F)", lineNum, colorByte)
 		}

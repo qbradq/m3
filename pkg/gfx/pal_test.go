@@ -14,8 +14,8 @@ func TestParsePalValid(t *testing.T) {
 	input := `
 0:
 $0F
+$00
 $10
-$20
 $30
 
 1:
@@ -36,7 +36,7 @@ $0F
 	if pal.Palettes[0].Slot != 0 || len(pal.Palettes[0].Colors) != 4 {
 		t.Errorf("unexpected slot 0: %+v", pal.Palettes[0])
 	}
-	expected0 := []byte{0x0F, 0x10, 0x20, 0x30}
+	expected0 := []byte{0x0F, 0x00, 0x10, 0x30}
 	for i, c := range expected0 {
 		if pal.Palettes[0].Colors[i] != c {
 			t.Errorf("slot 0 color %d = %02X, want %02X", i, pal.Palettes[0].Colors[i], c)
@@ -70,16 +70,25 @@ func TestParsePalErrors(t *testing.T) {
 			input: `0:
 $0F
 $0D
-$20
+$00
 $30`,
 			errContains: "forbidden color $0D",
+		},
+		{
+			name: "Color 20 error",
+			input: `0:
+$0F
+$00
+$20
+$30`,
+			errContains: "forbidden color $20",
 		},
 		{
 			name: "More than 4 colors",
 			input: `0:
 $0F
+$00
 $10
-$20
 $30
 $01`,
 			errContains: "contains more than 4 colors",
@@ -91,7 +100,7 @@ $0F
 $10
 0:
 $0F
-$20`,
+$00`,
 			errContains: "out of numeric order",
 		},
 		{
@@ -142,7 +151,7 @@ func TestConvertPNGToCHRWithPalette(t *testing.T) {
 $0F
 $06
 $0A
-$20
+$30
 `
 	pal, err := ParsePal(strings.NewReader(palInput))
 	if err != nil {
@@ -153,11 +162,11 @@ $20
 	// NES $0F: (0,0,0) -> %00 (color 0)
 	// NES $06: (84, 4, 0) -> %01 (color 1)
 	// NES $0A: (0, 64, 0) -> %10 (color 2)
-	// NES $20: (236, 238, 236) -> %11 (color 3)
+	// NES $30: (255, 255, 255) -> %11 (color 3)
 	c0 := color.RGBA{NESPaletteRGB[0x0F][0], NESPaletteRGB[0x0F][1], NESPaletteRGB[0x0F][2], 255}
 	c1 := color.RGBA{NESPaletteRGB[0x06][0], NESPaletteRGB[0x06][1], NESPaletteRGB[0x06][2], 255}
 	c2 := color.RGBA{NESPaletteRGB[0x0A][0], NESPaletteRGB[0x0A][1], NESPaletteRGB[0x0A][2], 255}
-	c3 := color.RGBA{NESPaletteRGB[0x20][0], NESPaletteRGB[0x20][1], NESPaletteRGB[0x20][2], 255}
+	c3 := color.RGBA{NESPaletteRGB[0x30][0], NESPaletteRGB[0x30][1], NESPaletteRGB[0x30][2], 255}
 
 	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
 	// Row 0: c0, c1, c2, c3, c0, c1, c2, c3
@@ -201,8 +210,8 @@ func TestConvertPNGToCHRWithPaletteMismatchError(t *testing.T) {
 	palInput := `
 0:
 $0F
+$00
 $10
-$20
 $30
 `
 	pal, err := ParsePal(strings.NewReader(palInput))

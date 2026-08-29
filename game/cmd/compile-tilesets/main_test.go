@@ -18,10 +18,11 @@ func TestLoadTileStructFields(t *testing.T) {
 	}
 
 	expected := map[string]string{
-		"Chr":      "uint8[4]",
-		"Palette":  "uint8",
-		"Walkable": "bool",
-		"Sailable": "bool",
+		"Chr":       "uint8[4]",
+		"Palette":   "uint8",
+		"BlocksVis": "bool",
+		"Walkable":  "bool",
+		"Sailable":  "bool",
 	}
 
 	if len(fields) != len(expected) {
@@ -46,18 +47,20 @@ func TestGenerateM3Code(t *testing.T) {
 		Image: "tiles_surface.png",
 		Tiles: []map[string]interface{}{
 			{
-				"name":     "Deep Water",
-				"chr":      []interface{}{float64(128), float64(128), float64(128), float64(128)},
-				"palette":  float64(1),
-				"walkable": false,
-				"sailable": true,
+				"name":       "Deep Water",
+				"chr":        []interface{}{float64(128), float64(128), float64(128), float64(128)},
+				"palette":    float64(1),
+				"blocks_vis": false,
+				"walkable":   false,
+				"sailable":   true,
 			},
 			{
-				"name":     "Grass",
-				"chr":      []interface{}{float64(130), float64(130), float64(130), float64(130)},
-				"palette":  float64(2),
-				"walkable": true,
-				"sailable": false,
+				"name":       "Grass",
+				"chr":        []interface{}{float64(130), float64(130), float64(130), float64(130)},
+				"palette":    float64(2),
+				"blocks_vis": false,
+				"walkable":   true,
+				"sailable":   false,
 			},
 		},
 	}
@@ -76,6 +79,9 @@ func TestGenerateM3Code(t *testing.T) {
 	if !strings.Contains(code, "Palette: 1") {
 		t.Errorf("expected Palette: 1, got:\n%s", code)
 	}
+	if !strings.Contains(code, "BlocksVis: false") {
+		t.Errorf("expected BlocksVis: false, got:\n%s", code)
+	}
 	if !strings.Contains(code, "Walkable: false") {
 		t.Errorf("expected Walkable: false, got:\n%s", code)
 	}
@@ -93,6 +99,7 @@ func TestGenerateM3Code(t *testing.T) {
 type Tile struct {
 	Chr uint8[4]
 	Palette uint8
+	BlocksVis bool
 	Walkable bool
 	Sailable bool
 }

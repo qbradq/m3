@@ -1,12 +1,29 @@
 {
     "activeFile": "",
     "expandedProjectPaths": [
+        "."
     ],
     "fileStates": {
+        "surface.tsx": {
+            "scaleInDock": 2,
+            "scaleInEditor": 4
+        }
     },
+    "last.imagePath": "/home/qbradq/projects/m3/game/data/maps",
+    "map.height": 64,
+    "map.tileHeight": 16,
+    "map.tileWidth": 16,
+    "map.width": 64,
     "openFiles": [
+        "surface.tsx"
     ],
     "project": "ultimax.tiled-project",
     "recentFiles": [
-    ]
+        "surface.tsx"
+    ],
+    "tileset.lastUsedFormat": "tsx",
+    "tileset.tileSize": {
+        "height": 16,
+        "width": 16
+    }
 }
