@@ -1272,5 +1272,121 @@ $31
 	}
 }
 
+func TestUndefinedSymbolErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		src         string
+		expectedErr string
+	}{
+		{
+			name: "undefined variable in expression",
+			src: `package main
+func main() {
+    x := nonExistentVar + 1
+}`,
+			expectedErr: `undefined symbol "nonExistentVar"`,
+		},
+		{
+			name: "undefined function call",
+			src: `package main
+func main() {
+    doSomethingMagic()
+}`,
+			expectedErr: `undefined function "doSomethingMagic"`,
+		},
+		{
+			name: "undefined symbol in imported package",
+			src: `package main
+import "oam.m3"
+func main() {
+    _ = oam.NonExistentSymbol
+}`,
+			expectedErr: `undefined symbol "NonExistentSymbol" in package "oam"`,
+		},
+		{
+			name: "undefined function in imported package",
+			src: `package main
+import "ppu.m3"
+func main() {
+    ppu.NonExistentFunc()
+}`,
+			expectedErr: `undefined function "NonExistentFunc" in package "ppu"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := Compile("test.m3", tt.src)
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.expectedErr)
+			}
+			if !strings.Contains(err.Error(), tt.expectedErr) {
+				t.Fatalf("expected error containing %q, got %v", tt.expectedErr, err)
+			}
+		})
+	}
+
+	// Test with relative import
+	t.Run("undefined symbol in relative import", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		dataSrc := `package data
+data SpritesPal uint8[][] bank 61 = {
+    {1, 2, 3, 4},
+}
+`
+		mainSrc := `package main
+import "./data.m3"
+func main() {
+    _ = data.SpritePal[0]
+}
+`
+		if err := os.WriteFile(filepath.Join(tmpDir, "data.m3"), []byte(dataSrc), 0644); err != nil {
+			t.Fatal(err)
+		}
+		mainFile := filepath.Join(tmpDir, "main.m3")
+		if err := os.WriteFile(mainFile, []byte(mainSrc), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		_, _, err := Compile(mainFile, mainSrc)
+		if err == nil {
+			t.Fatal("expected error for undefined symbol SpritePal, got nil")
+		}
+		if !strings.Contains(err.Error(), `undefined symbol "SpritePal" in package "data"`) {
+			t.Fatalf("expected undefined symbol SpritePal error, got: %v", err)
+		}
+	})
+}
+
+func TestForwardReferences(t *testing.T) {
+	// Test forward reference to function and package variable declared later
+	src := `package main
+
+func first() {
+    second()
+    total = target_val + 5
+}
+
+func second() {
+    first()
+}
+
+var total uint8 ram
+const target_val uint8 = 42
+`
+	_, asmOutput, err := Compile("forward_test.m3", src)
+	if err != nil {
+		t.Fatalf("Compile failed with forward references: %v", err)
+	}
+
+	if !strings.Contains(asmOutput, "JSR _main_second") {
+		t.Errorf("expected JSR _main_second in assembly:\n%s", asmOutput)
+	}
+	if !strings.Contains(asmOutput, "_main_total:") {
+		t.Errorf("expected _main_total in assembly:\n%s", asmOutput)
+	}
+}
+
+
 
 

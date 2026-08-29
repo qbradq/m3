@@ -75,7 +75,7 @@ func ResolveImport(currentFile, importPath string) ([]byte, string, error) {
 	return nil, "", fmt.Errorf("cannot find imported library %q in pkg/data/lib or relative paths", importPath)
 }
 
-func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[string]bool, funcMap map[string]*FuncDecl, declMap map[string]Decl) error {
+func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[string]bool, funcMap map[string]*FuncDecl, declMap map[string]Decl, importedPackages map[string]bool) error {
 	for _, imp := range file.Imports {
 		content, resolvedPath, err := ResolveImport(currentFile, imp.Path)
 		if err != nil {
@@ -93,7 +93,11 @@ func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[st
 			return fmt.Errorf("failed to parse import %q (%s): %w", imp.Path, resolvedPath, err)
 		}
 
-		if err := resolveAndMergeImports(impAST, resolvedPath, visited, funcMap, declMap); err != nil {
+		if impAST.PackageName != "" && importedPackages != nil {
+			importedPackages[impAST.PackageName] = true
+		}
+
+		if err := resolveAndMergeImports(impAST, resolvedPath, visited, funcMap, declMap, importedPackages); err != nil {
 			return err
 		}
 
@@ -114,6 +118,16 @@ func resolveAndMergeImports(file *SourceFile, currentFile string, visited map[st
 				}
 			case *TypeDecl:
 				file.Decls = append(file.Decls, d)
+				pkg := d.Package
+				if pkg == "" {
+					pkg = impAST.PackageName
+				}
+				if pkg != "" && declMap != nil {
+					declMap[pkg+"."+d.Name] = d
+				}
+				if pkg == file.PackageName && declMap != nil {
+					declMap[d.Name] = d
+				}
 			case *DataDecl:
 				pkg := d.Package
 				if pkg == "" {
@@ -315,9 +329,14 @@ func Compile(filename, source string) (*SourceFile, string, error) {
 		visited[filename] = true
 	}
 
+	importedPackages := make(map[string]bool)
+	if astFile.PackageName != "" {
+		importedPackages[astFile.PackageName] = true
+	}
+
 	funcMap := make(map[string]*FuncDecl)
 	declMap := make(map[string]Decl)
-	if err := resolveAndMergeImports(astFile, filename, visited, funcMap, declMap); err != nil {
+	if err := resolveAndMergeImports(astFile, filename, visited, funcMap, declMap, importedPackages); err != nil {
 		return astFile, "", err
 	}
 
@@ -352,10 +371,29 @@ func Compile(filename, source string) (*SourceFile, string, error) {
 			if astFile.PackageName != "" {
 				declMap[astFile.PackageName+"."+d.Name] = d
 			}
+		case *TypeDecl:
+			declMap[d.Name] = d
+			if astFile.PackageName != "" {
+				declMap[astFile.PackageName+"."+d.Name] = d
+			}
 		}
 	}
 
-	if err := validateAST(astFile, funcMap); err != nil {
+	structMap := make(map[string]*StructType)
+	for _, decl := range astFile.Decls {
+		if td, ok := decl.(*TypeDecl); ok {
+			if st, ok := td.Type.(*StructType); ok {
+				structMap[td.Name] = st
+				if td.Package != "" {
+					structMap[td.Package+"."+td.Name] = st
+				} else if astFile.PackageName != "" {
+					structMap[astFile.PackageName+"."+td.Name] = st
+				}
+			}
+		}
+	}
+
+	if err := validateAST(astFile, funcMap, declMap, structMap, importedPackages); err != nil {
 		return astFile, "", err
 	}
 
@@ -376,10 +414,81 @@ func isPrimitiveType(name string) bool {
 	}
 }
 
-func validateAST(file *SourceFile, funcMap map[string]*FuncDecl) error {
+func collectLocalSymbols(stmt Stmt, symbols map[string]bool) {
+	if stmt == nil {
+		return
+	}
+	switch s := stmt.(type) {
+	case *BlockStmt:
+		for _, inner := range s.Stmts {
+			collectLocalSymbols(inner, symbols)
+		}
+	case *VarDeclStmt:
+		symbols[s.Decl.Name] = true
+	case *ShortVarDeclStmt:
+		symbols[s.Name] = true
+	case *ConstDeclStmt:
+		symbols[s.Decl.Name] = true
+	case *DefineDeclStmt:
+		symbols[s.Decl.Name] = true
+	case *DataDeclStmt:
+		symbols[s.Decl.Name] = true
+	case *IfStmt:
+		collectLocalSymbols(s.Init, symbols)
+		collectLocalSymbols(s.Then, symbols)
+		collectLocalSymbols(s.Else, symbols)
+	case *ForStmt:
+		collectLocalSymbols(s.Init, symbols)
+		collectLocalSymbols(s.Post, symbols)
+		collectLocalSymbols(s.Body, symbols)
+	case *SwitchStmt:
+		for _, cc := range s.Cases {
+			for _, inner := range cc.Body {
+				collectLocalSymbols(inner, symbols)
+			}
+		}
+	}
+}
+
+func validateAST(file *SourceFile, funcMap map[string]*FuncDecl, declMap map[string]Decl, structMap map[string]*StructType, importedPackages map[string]bool) error {
 	var curFunc *FuncDecl
+	var curLocalSymbols map[string]bool
 	var walkExpr func(e Expr) error
 	var walkStmt func(s Stmt) error
+
+	isDeclaredSymbol := func(name string) bool {
+		if curLocalSymbols != nil && curLocalSymbols[name] {
+			return true
+		}
+		if _, ok := declMap[name]; ok {
+			return true
+		}
+		if file.PackageName != "" {
+			if _, ok := declMap[file.PackageName+"."+name]; ok {
+				return true
+			}
+		}
+		if _, ok := funcMap[name]; ok {
+			return true
+		}
+		if file.PackageName != "" {
+			if _, ok := funcMap[file.PackageName+"."+name]; ok {
+				return true
+			}
+		}
+		if _, ok := structMap[name]; ok {
+			return true
+		}
+		if file.PackageName != "" {
+			if _, ok := structMap[file.PackageName+"."+name]; ok {
+				return true
+			}
+		}
+		if isPrimitiveType(name) || name == "string" || name == "_" {
+			return true
+		}
+		return false
+	}
 
 	walkExpr = func(e Expr) error {
 		if e == nil {
@@ -388,9 +497,6 @@ func validateAST(file *SourceFile, funcMap map[string]*FuncDecl) error {
 		switch node := e.(type) {
 		case *CallExpr:
 			if err := checkCallExpr(node, file.PackageName, funcMap); err != nil {
-				return err
-			}
-			if err := walkExpr(node.Func); err != nil {
 				return err
 			}
 			for _, arg := range node.Args {
@@ -422,7 +528,23 @@ func validateAST(file *SourceFile, funcMap map[string]*FuncDecl) error {
 			}
 			return walkExpr(node.Index)
 		case *MemberExpr:
+			if targetIdent, ok := node.Target.(*Ident); ok && (importedPackages[targetIdent.Name] || targetIdent.Name == file.PackageName) {
+				memberKey := targetIdent.Name + "." + node.Member
+				_, hasDecl := declMap[memberKey]
+				_, hasFunc := funcMap[memberKey]
+				_, hasStruct := structMap[memberKey]
+				if !hasDecl && !hasFunc && !hasStruct {
+					return fmt.Errorf("%s:%d:%d: undefined symbol %q in package %q",
+						node.Pos().Filename, node.Pos().Line, node.Pos().Column, node.Member, targetIdent.Name)
+				}
+				return nil
+			}
 			return walkExpr(node.Target)
+		case *Ident:
+			if !isDeclaredSymbol(node.Name) {
+				return fmt.Errorf("%s:%d:%d: undefined symbol %q",
+					node.Pos().Filename, node.Pos().Line, node.Pos().Column, node.Name)
+			}
 		case *IncpalExpr:
 			return walkExpr(node.Count)
 		case *StructLit:
@@ -472,10 +594,13 @@ func validateAST(file *SourceFile, funcMap map[string]*FuncDecl) error {
 					}
 				}
 			}
-			if err := walkExpr(node.Left); err != nil {
+			if err := walkExpr(node.Right); err != nil {
 				return err
 			}
-			return walkExpr(node.Right)
+			if ident, ok := node.Left.(*Ident); ok && ident.Name == "_" {
+				return nil
+			}
+			return walkExpr(node.Left)
 		case *IncDecStmt:
 			if ident, ok := node.Expr.(*Ident); ok && curFunc != nil {
 				for _, p := range curFunc.Params {
@@ -563,12 +688,18 @@ func validateAST(file *SourceFile, funcMap map[string]*FuncDecl) error {
 			}
 		case *FuncDecl:
 			curFunc = d
+			curLocalSymbols = make(map[string]bool)
+			for _, p := range d.Params {
+				curLocalSymbols[p.Name] = true
+			}
+			collectLocalSymbols(d.Body, curLocalSymbols)
 			if d.Body != nil {
 				if err := walkStmt(d.Body); err != nil {
 					return err
 				}
 			}
 			curFunc = nil
+			curLocalSymbols = nil
 		}
 	}
 
@@ -597,6 +728,8 @@ func checkCallExpr(call *CallExpr, defaultPkg string, funcMap map[string]*FuncDe
 			funcName = mem.Member
 			fullName = fmt.Sprintf("%s.%s", funcPkg, funcName)
 		}
+	} else {
+		return fmt.Errorf("%s:%d:%d: invalid function call expression", call.Pos().Filename, call.Pos().Line, call.Pos().Column)
 	}
 
 	if funcName != "" {
@@ -608,17 +741,24 @@ func checkCallExpr(call *CallExpr, defaultPkg string, funcMap map[string]*FuncDe
 			targetFn = funcMap[funcName]
 		}
 
-		if targetFn != nil {
-			expected := len(targetFn.Params)
-			actual := len(call.Args)
-			if actual < expected {
-				return fmt.Errorf("%s:%d:%d: too few arguments in call to %s (expected %d, got %d)",
-					call.Pos().Filename, call.Pos().Line, call.Pos().Column, fullName, expected, actual)
+		if targetFn == nil {
+			if funcPkg != "" && funcPkg != defaultPkg {
+				return fmt.Errorf("%s:%d:%d: undefined function %q in package %q",
+					call.Pos().Filename, call.Pos().Line, call.Pos().Column, funcName, funcPkg)
 			}
-			if actual > expected {
-				return fmt.Errorf("%s:%d:%d: too many arguments in call to %s (expected %d, got %d)",
-					call.Pos().Filename, call.Pos().Line, call.Pos().Column, fullName, expected, actual)
-			}
+			return fmt.Errorf("%s:%d:%d: undefined function %q",
+				call.Pos().Filename, call.Pos().Line, call.Pos().Column, fullName)
+		}
+
+		expected := len(targetFn.Params)
+		actual := len(call.Args)
+		if actual < expected {
+			return fmt.Errorf("%s:%d:%d: too few arguments in call to %s (expected %d, got %d)",
+				call.Pos().Filename, call.Pos().Line, call.Pos().Column, fullName, expected, actual)
+		}
+		if actual > expected {
+			return fmt.Errorf("%s:%d:%d: too many arguments in call to %s (expected %d, got %d)",
+				call.Pos().Filename, call.Pos().Line, call.Pos().Column, fullName, expected, actual)
 		}
 	}
 
